@@ -1,0 +1,9 @@
+name "dimage"
+description "Image file handling for D"
+authors "Laszlo Szeremi"
+copyright "Copyright © 2018, Laszlo Szeremi"
+license "Boost"
+target "library"
+configuration "unittest"{
+	dependency "vfile" version="0.1.0"
+}
