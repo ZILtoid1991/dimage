@@ -218,6 +218,7 @@ public class TGA : Image, ImageMetadata{
 				scanlineTable.length = 0;
 				scanlineTable.reserve(height);
 			}
+			version(unittest) uint pixelCount;
 			switch(header.pixelDepth){
 				case 16:
 					break;
@@ -235,8 +236,9 @@ public class TGA : Image, ImageMetadata{
 					while(src < dest){
 						ubyte* currBlockBegin = src, currBlockEnd = src;
 						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
-							ubyte blockLength = 1;
-							while(currBlockEnd[0] == currBlockEnd[1]){
+							ubyte blockLength;
+							//while(src < dest && currBlockEnd[0] == currBlockEnd[1]){
+							do{
 								src++;
 								currBlockEnd++;
 								blockLength++;
@@ -248,8 +250,12 @@ public class TGA : Image, ImageMetadata{
 										break;
 									}
 								}
-								if(blockLength == 128 || src + 1 == dest)
+								if(blockLength == 128)
 									break;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							version(unittest){
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height);
 							}
 							blockLength--;
 							blockLength |= 0b1000_0000;
@@ -257,10 +263,11 @@ public class TGA : Image, ImageMetadata{
 							writeBuff[1] = currBlockBegin[0];
 							file.rawWrite(writeBuff[0..2]);
 						}else{		//literal block
-							ubyte blockLength = 1;
-							writeBuff[1] = currBlockEnd[0];
-							while(currBlockEnd[0] != currBlockEnd[1] && currBlockEnd[1] != currBlockEnd[2]){	//also check if next byte pair isn't RLE block
-								writeBuff[1 + blockLength] = currBlockEnd[1];
+							ubyte blockLength;
+							
+							//while(src < dest && currBlockEnd[0] != currBlockEnd[1]){
+							do{
+								writeBuff[1 + blockLength] = currBlockEnd[0];
 								src++;
 								currBlockEnd++;
 								blockLength++;
@@ -271,13 +278,18 @@ public class TGA : Image, ImageMetadata{
 										break;
 									}
 								}
-								if(blockLength == 128 || src + 2 == dest)
+								if(blockLength == 128)
 									break;
-							}
+								//blockLength++;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
 							//writeBuff[1] = currBlockEnd[0];
+							version(unittest){
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height);
+							}
 							blockLength--;
 							writeBuff[0] = blockLength;
-							file.rawWrite(writeBuff[0..blockLength + 3]);
+							file.rawWrite(writeBuff[0..blockLength + 2]);
 						}
 					}
 					break;
@@ -287,7 +299,11 @@ public class TGA : Image, ImageMetadata{
 		file.rawWrite([header]);
 		file.rawWrite(imageID);
 		file.rawWrite(paletteData);
-		file.rawWrite(imageData);
+		if(header.imageType >= TGAHeader.ImageType.RLEMapped && header.imageType <= TGAHeader.ImageType.RLEGrayscale){
+			compressRLE();
+		}else{
+			file.rawWrite(imageData);
+		}
 		static if(saveDevArea){
 			if(developerAreaTags.length){
 				//make all tags valid
@@ -665,7 +681,7 @@ unittest{
 		}
 	}
 	assert(TGAHeader.sizeof == 18);
-	ubyte[] tempStream;
+	//void[] tempStream;
 	//test 8 bit RLE load for 8 bit greyscale and indexed
 	std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/grey_8.tga");
 	std.stdio.writeln("Loading ", greyscaleUncFile.name);
@@ -678,11 +694,13 @@ unittest{
 	compareImages(greyscaleUnc, greyscaleRLE);
 	//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
 	greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
-	//VFile virtualFile = VFile(tempStream);
-	std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
-	greyscaleUnc.save(virtualFile);
+	VFile virtualFile;// = VFile(tempStream);
+	//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
+	greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
 	std.stdio.writeln("Save to virtual file was successful");
-	greyscaleRLE = TGA.load(virtualFile);
+	std.stdio.writeln(virtualFile.size);
+	virtualFile.seek(0);
+	greyscaleRLE = TGA.load!VFile(virtualFile);
 	std.stdio.writeln("Load from virtual file was successful");
 	compareImages(greyscaleUnc, greyscaleRLE);
 }
