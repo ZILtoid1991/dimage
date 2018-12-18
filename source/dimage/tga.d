@@ -50,7 +50,7 @@ public class TGA : Image, ImageMetadata{
 	 * Loads a Truevision TARGA file and creates a TGA object.
 	 * FILE can be either std.stdio's file, my own implementation of a virtual file (see ziltoid1991/vfile), or any compatible solution.
 	 */
-	public static TGA load(FILE = std.stdio.File, bool loadDevArea = false, bool loadExtArea = false)(FILE file){
+	public static TGA load(FILE = std.stdio.File, bool loadDevArea = false, bool loadExtArea = false)(ref FILE file){
 		import std.stdio;
 		ubyte[] loadRLEImageData(const ref TGAHeader header){
 			size_t target = header.width * header.height;
@@ -116,7 +116,7 @@ public class TGA : Image, ImageMetadata{
 					target--;
 				}
 			}
-			assert(result.length == (header.width * header.height / (header.pixelDepth / 8)));
+			assert(result.length == (header.width * header.height * header.pixelDepth) / 8);
 			return result;
 		}
 		TGAHeader headerLoad;
@@ -210,7 +210,7 @@ public class TGA : Image, ImageMetadata{
 	 * rates by a margin in exchange. If false, then it'll generate a scanline table.
 	 */
 	public void save(FILE = std.stdio.File, bool saveDevArea = false, bool saveExtArea = false, 
-			bool ignoreScanlineBounds = false)(FILE file){
+			bool ignoreScanlineBounds = false)(ref FILE file){
 		import std.stdio;
 		void compressRLE(){
 			static if(!ignoreScanlineBounds){
@@ -219,20 +219,221 @@ public class TGA : Image, ImageMetadata{
 				scanlineTable.reserve(height);
 			}
 			version(unittest) uint pixelCount;
+			ubyte[] writeBuff;
+			static if(!ignoreScanlineBounds)
+				uint currScanlineLength;
 			switch(header.pixelDepth){
 				case 16:
+					ushort* src = cast(ushort*)(cast(void*)imageData.ptr);
+					const ushort* dest = src + imageData.length;
+					writeBuff.length = 257;
+					ushort* writeBuff0 = cast(ushort*)(cast(void*)writeBuff.ptr + 1);
+					while(src < dest){
+						ushort* currBlockBegin = src, currBlockEnd = src;
+						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
+							ubyte blockLength;
+							//while(src < dest && currBlockEnd[0] == currBlockEnd[1]){
+							do{
+								src++;
+								currBlockEnd++;
+								blockLength++;
+								static if(!ignoreScanlineBounds){
+									currScanlineLength++;
+									if(currScanlineLength == maxScanlineLength){
+										currScanlineLength = 0;
+										scanlineTable ~= cast(uint)file.tell;
+										break;
+									}
+								}
+								if(blockLength == 128)
+									break;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							version(unittest){
+								import std.conv : to;
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height, "Required size: " ~ to!string(header.width * header.height) 
+										~ " Current size:" ~ to!string(pixelCount));
+							}
+							blockLength--;
+							blockLength |= 0b1000_0000;
+							writeBuff[0] = blockLength;
+							writeBuff0[0] = currBlockBegin[0];
+							file.rawWrite(writeBuff[0..3]);
+						}else{		//literal block
+							ubyte blockLength;
+							
+							//while(src < dest && currBlockEnd[0] != currBlockEnd[1]){
+							do{
+								writeBuff0[blockLength] = currBlockEnd[0];
+								src++;
+								currBlockEnd++;
+								blockLength++;
+								static if(!ignoreScanlineBounds){
+									currScanlineLength++;
+									if(currScanlineLength == maxScanlineLength){
+										currScanlineLength = 0;
+										break;
+									}
+								}
+								if(blockLength == 128)
+									break;
+								//blockLength++;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							//writeBuff[1] = currBlockEnd[0];
+							version(unittest){
+								import std.conv : to;
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height, "Required size: " ~ to!string(header.width * header.height) 
+										~ " Current size:" ~ to!string(pixelCount));
+							}
+							blockLength--;
+							writeBuff[0] = blockLength;
+							file.rawWrite(writeBuff[0..((blockLength * 2) + 3)]);
+						}
+					}
 					break;
 				case 24:
+					Pixel24Bit* src = cast(Pixel24Bit*)(cast(void*)imageData.ptr);
+					const Pixel24Bit* dest = src + imageData.length;
+					writeBuff.length = 385;
+					Pixel24Bit* writeBuff0 = cast(Pixel24Bit*)(cast(void*)writeBuff.ptr + 1);
+					while(src < dest){
+						Pixel24Bit* currBlockBegin = src, currBlockEnd = src;
+						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
+							ubyte blockLength;
+							//while(src < dest && currBlockEnd[0] == currBlockEnd[1]){
+							do{
+								src++;
+								currBlockEnd++;
+								blockLength++;
+								static if(!ignoreScanlineBounds){
+									currScanlineLength++;
+									if(currScanlineLength == maxScanlineLength){
+										currScanlineLength = 0;
+										scanlineTable ~= cast(uint)file.tell;
+										break;
+									}
+								}
+								if(blockLength == 128)
+									break;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							version(unittest){
+								import std.conv : to;
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height, "Required size: " ~ to!string(header.width * header.height) 
+										~ " Current size:" ~ to!string(pixelCount));
+							}
+							blockLength--;
+							blockLength |= 0b1000_0000;
+							writeBuff[0] = blockLength;
+							writeBuff0[0] = currBlockBegin[0];
+							file.rawWrite(writeBuff[0..3]);
+						}else{		//literal block
+							ubyte blockLength;
+							
+							//while(src < dest && currBlockEnd[0] != currBlockEnd[1]){
+							do{
+								writeBuff0[blockLength] = currBlockEnd[0];
+								src++;
+								currBlockEnd++;
+								blockLength++;
+								static if(!ignoreScanlineBounds){
+									currScanlineLength++;
+									if(currScanlineLength == maxScanlineLength){
+										currScanlineLength = 0;
+										break;
+									}
+								}
+								if(blockLength == 128)
+									break;
+								//blockLength++;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							//writeBuff[1] = currBlockEnd[0];
+							version(unittest){
+								import std.conv : to;
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height, "Required size: " ~ to!string(header.width * header.height) 
+										~ " Current size:" ~ to!string(pixelCount));
+							}
+							blockLength--;
+							writeBuff[0] = blockLength;
+							file.rawWrite(writeBuff[0..((blockLength * 3) + 4)]);
+						}
+					}
 					break;
 				case 32:
+					uint* src = cast(uint*)(cast(void*)imageData.ptr);
+					const uint* dest = src + imageData.length;
+					writeBuff.length = 513;
+					uint* writeBuff0 = cast(uint*)(cast(void*)writeBuff.ptr + 1);
+					while(src < dest){
+						uint* currBlockBegin = src, currBlockEnd = src;
+						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
+							ubyte blockLength;
+							//while(src < dest && currBlockEnd[0] == currBlockEnd[1]){
+							do{
+								src++;
+								currBlockEnd++;
+								blockLength++;
+								static if(!ignoreScanlineBounds){
+									currScanlineLength++;
+									if(currScanlineLength == maxScanlineLength){
+										currScanlineLength = 0;
+										scanlineTable ~= cast(uint)file.tell;
+										break;
+									}
+								}
+								if(blockLength == 128)
+									break;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							version(unittest){
+								import std.conv : to;
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height, "Required size: " ~ to!string(header.width * header.height) 
+										~ " Current size:" ~ to!string(pixelCount));
+							}
+							blockLength--;
+							blockLength |= 0b1000_0000;
+							writeBuff[0] = blockLength;
+							writeBuff0[0] = currBlockBegin[0];
+							file.rawWrite(writeBuff[0..3]);
+						}else{		//literal block
+							ubyte blockLength;
+							
+							//while(src < dest && currBlockEnd[0] != currBlockEnd[1]){
+							do{
+								writeBuff0[blockLength] = currBlockEnd[0];
+								src++;
+								currBlockEnd++;
+								blockLength++;
+								static if(!ignoreScanlineBounds){
+									currScanlineLength++;
+									if(currScanlineLength == maxScanlineLength){
+										currScanlineLength = 0;
+										break;
+									}
+								}
+								if(blockLength == 128)
+									break;
+								//blockLength++;
+							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							//writeBuff[1] = currBlockEnd[0];
+							version(unittest){
+								import std.conv : to;
+								pixelCount += blockLength;
+								assert(pixelCount <= header.width * header.height, "Required size: " ~ to!string(header.width * header.height) 
+										~ " Current size:" ~ to!string(pixelCount));
+							}
+							blockLength--;
+							writeBuff[0] = blockLength;
+							file.rawWrite(writeBuff[0..((blockLength * 4) + 5)]);
+						}
+					}
 					break;
 				default:
 					ubyte* src = imageData.ptr;
 					const ubyte* dest = src + imageData.length;
-					ubyte[] writeBuff;
 					writeBuff.length = 129;
-					static if(!ignoreScanlineBounds)
-						uint currScanlineLength;
 					while(src < dest){
 						ubyte* currBlockBegin = src, currBlockEnd = src;
 						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
@@ -254,8 +455,10 @@ public class TGA : Image, ImageMetadata{
 									break;
 							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
 							version(unittest){
+								import std.conv : to;
 								pixelCount += blockLength;
-								assert(pixelCount <= header.width * header.height);
+								assert(pixelCount <= imageData.length, "Required size: " ~ to!string(imageData.length) 
+										~ " Current size:" ~ to!string(pixelCount));
 							}
 							blockLength--;
 							blockLength |= 0b1000_0000;
@@ -281,11 +484,13 @@ public class TGA : Image, ImageMetadata{
 								if(blockLength == 128)
 									break;
 								//blockLength++;
-							}while(src < dest && currBlockBegin[0] == currBlockEnd[0]);
+							}while(src < dest && currBlockEnd[0] != currBlockEnd[1]);
 							//writeBuff[1] = currBlockEnd[0];
 							version(unittest){
+								import std.conv : to;
 								pixelCount += blockLength;
-								assert(pixelCount <= header.width * header.height);
+								assert(pixelCount <= imageData.length, "Required size: " ~ to!string(imageData.length) 
+										~ " Current size:" ~ to!string(pixelCount));
 							}
 							blockLength--;
 							writeBuff[0] = blockLength;
@@ -396,7 +601,7 @@ public class TGA : Image, ImageMetadata{
 			case 1: return pixelOrder1BitBE.dup;
 			case 2: return pixelOrder2BitBE.dup;
 			case 4: return pixelOrder4BitBE.dup;
-			default: return null;
+			default: return [];
 		}
 	}
 	/**
@@ -407,7 +612,7 @@ public class TGA : Image, ImageMetadata{
 			case 1: return pixelShift1BitBE.dup;
 			case 2: return pixelShift2BitBE.dup;
 			case 4: return pixelShift4BitBE.dup;
-			default: return null;
+			default: return [];
 		}
 	}
 	public string getID(){
@@ -683,24 +888,114 @@ unittest{
 	assert(TGAHeader.sizeof == 18);
 	//void[] tempStream;
 	//test 8 bit RLE load for 8 bit greyscale and indexed
-	std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/grey_8.tga");
-	std.stdio.writeln("Loading ", greyscaleUncFile.name);
-	TGA greyscaleUnc = TGA.load(greyscaleUncFile);
-	std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
-	std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/grey_8_rle.tga");
-	std.stdio.writeln("Loading ", greyscaleRLEFile.name);
-	TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
-	std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
-	compareImages(greyscaleUnc, greyscaleRLE);
-	//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-	greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
-	VFile virtualFile;// = VFile(tempStream);
-	//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
-	greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
-	std.stdio.writeln("Save to virtual file was successful");
-	std.stdio.writeln(virtualFile.size);
-	virtualFile.seek(0);
-	greyscaleRLE = TGA.load!VFile(virtualFile);
-	std.stdio.writeln("Load from virtual file was successful");
-	compareImages(greyscaleUnc, greyscaleRLE);
+	{
+		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/grey_8.tga");
+		std.stdio.writeln("Loading ", greyscaleUncFile.name);
+		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
+		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
+		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/grey_8_rle.tga");
+		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
+		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
+		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
+		compareImages(greyscaleUnc, greyscaleRLE);
+		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
+		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		VFile virtualFile;// = VFile(tempStream);
+		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
+		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		std.stdio.writeln("Save to virtual file was successful");
+		std.stdio.writeln(virtualFile.size);
+		virtualFile.seek(0);
+		greyscaleRLE = TGA.load!VFile(virtualFile);
+		std.stdio.writeln("Load from virtual file was successful");
+		compareImages(greyscaleUnc, greyscaleRLE);
+	}
+	{
+		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/mapped_8.tga");
+		std.stdio.writeln("Loading ", greyscaleUncFile.name);
+		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
+		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
+		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/mapped_8_rle.tga");
+		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
+		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
+		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
+		compareImages(greyscaleUnc, greyscaleRLE);
+		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
+		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		VFile virtualFile;// = VFile(tempStream);
+		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
+		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		std.stdio.writeln("Save to virtual file was successful");
+		std.stdio.writeln(virtualFile.size);
+		virtualFile.seek(0);
+		greyscaleRLE = TGA.load!VFile(virtualFile);
+		std.stdio.writeln("Load from virtual file was successful");
+		compareImages(greyscaleUnc, greyscaleRLE);
+	}
+	{
+		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/truecolor_16.tga");
+		std.stdio.writeln("Loading ", greyscaleUncFile.name);
+		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
+		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
+		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/truecolor_16_rle.tga");
+		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
+		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
+		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
+		compareImages(greyscaleUnc, greyscaleRLE);
+		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
+		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		VFile virtualFile;// = VFile(tempStream);
+		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
+		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		std.stdio.writeln("Save to virtual file was successful");
+		std.stdio.writeln(virtualFile.size);
+		virtualFile.seek(0);
+		greyscaleRLE = TGA.load!VFile(virtualFile);
+		std.stdio.writeln("Load from virtual file was successful");
+		compareImages(greyscaleUnc, greyscaleRLE);
+	}
+	{
+		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/truecolor_24.tga");
+		std.stdio.writeln("Loading ", greyscaleUncFile.name);
+		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
+		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
+		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/truecolor_24_rle.tga");
+		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
+		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
+		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
+		compareImages(greyscaleUnc, greyscaleRLE);
+		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
+		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		VFile virtualFile;// = VFile(tempStream);
+		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
+		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		std.stdio.writeln("Save to virtual file was successful");
+		std.stdio.writeln(virtualFile.size);
+		virtualFile.seek(0);
+		greyscaleRLE = TGA.load!VFile(virtualFile);
+		std.stdio.writeln("Load from virtual file was successful");
+		compareImages(greyscaleUnc, greyscaleRLE);
+	}
+	{
+		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/truecolor_32.tga");
+		std.stdio.writeln("Loading ", greyscaleUncFile.name);
+		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
+		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
+		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/truecolor_32_rle.tga");
+		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
+		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
+		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
+		compareImages(greyscaleUnc, greyscaleRLE);
+		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
+		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		VFile virtualFile;// = VFile(tempStream);
+		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
+		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		std.stdio.writeln("Save to virtual file was successful");
+		std.stdio.writeln(virtualFile.size);
+		virtualFile.seek(0);
+		greyscaleRLE = TGA.load!VFile(virtualFile);
+		std.stdio.writeln("Load from virtual file was successful");
+		compareImages(greyscaleUnc, greyscaleRLE);
+	}
 }
