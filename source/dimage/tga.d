@@ -91,7 +91,7 @@ public class TGA : Image, ImageMetadata{
 						}
 						target -= dataBuffer[0];
 					}
-					assert(result.length == (header.width * header.height / (header.pixelDepth / 8)));
+					assert(result.length == (header.width * header.height));
 					return result;
 			}
 			while(target){
@@ -112,11 +112,11 @@ public class TGA : Image, ImageMetadata{
 					ubyte[] literalBlock;
 					literalBlock.length = dataBuffer[0] * bytedepth;
 					file.rawRead(literalBlock);
-					result ~= dataBuffer[1] ~ literalBlock;
+					result ~= dataBuffer[1..$] ~ literalBlock;
 					target--;
 				}
 			}
-			assert(result.length == (header.width * header.height * header.pixelDepth) / 8);
+			assert(result.length == (header.width * header.height * bytedepth));
 			return result;
 		}
 		TGAHeader headerLoad;
@@ -225,7 +225,7 @@ public class TGA : Image, ImageMetadata{
 			switch(header.pixelDepth){
 				case 16:
 					ushort* src = cast(ushort*)(cast(void*)imageData.ptr);
-					const ushort* dest = src + imageData.length;
+					const ushort* dest = src + (imageData.length / 2);
 					writeBuff.length = 257;
 					ushort* writeBuff0 = cast(ushort*)(cast(void*)writeBuff.ptr + 1);
 					while(src < dest){
@@ -283,6 +283,7 @@ public class TGA : Image, ImageMetadata{
 							version(unittest){
 								import std.conv : to;
 								pixelCount += blockLength;
+								//std.stdio.writeln(pixelCount);
 								assert(pixelCount <= header.width * header.height, "Required size: " ~ to!string(header.width * header.height) 
 										~ " Current size:" ~ to!string(pixelCount));
 							}
@@ -294,9 +295,10 @@ public class TGA : Image, ImageMetadata{
 					break;
 				case 24:
 					Pixel24Bit* src = cast(Pixel24Bit*)(cast(void*)imageData.ptr);
-					const Pixel24Bit* dest = src + imageData.length;
-					writeBuff.length = 385;
-					Pixel24Bit* writeBuff0 = cast(Pixel24Bit*)(cast(void*)writeBuff.ptr + 1);
+					const Pixel24Bit* dest = src + (imageData.length / 3);
+					writeBuff.length = 1;
+					Pixel24Bit[] writeBuff0;
+					writeBuff0.length = 128;
 					while(src < dest){
 						Pixel24Bit* currBlockBegin = src, currBlockEnd = src;
 						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
@@ -327,7 +329,8 @@ public class TGA : Image, ImageMetadata{
 							blockLength |= 0b1000_0000;
 							writeBuff[0] = blockLength;
 							writeBuff0[0] = currBlockBegin[0];
-							file.rawWrite(writeBuff[0..3]);
+							file.rawWrite(writeBuff[0..1]);
+							file.rawWrite(writeBuff0[0..1]);
 						}else{		//literal block
 							ubyte blockLength;
 							
@@ -357,15 +360,17 @@ public class TGA : Image, ImageMetadata{
 							}
 							blockLength--;
 							writeBuff[0] = blockLength;
-							file.rawWrite(writeBuff[0..((blockLength * 3) + 4)]);
+							file.rawWrite(writeBuff[0..1]);
+							file.rawWrite(writeBuff0[0..(blockLength + 1)]);
 						}
 					}
 					break;
 				case 32:
 					uint* src = cast(uint*)(cast(void*)imageData.ptr);
-					const uint* dest = src + imageData.length;
-					writeBuff.length = 513;
-					uint* writeBuff0 = cast(uint*)(cast(void*)writeBuff.ptr + 1);
+					const uint* dest = src + (imageData.length / 4);
+					writeBuff.length = 1;
+					uint[] writeBuff0;
+					writeBuff0.length = 128;
 					while(src < dest){
 						uint* currBlockBegin = src, currBlockEnd = src;
 						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
@@ -396,7 +401,8 @@ public class TGA : Image, ImageMetadata{
 							blockLength |= 0b1000_0000;
 							writeBuff[0] = blockLength;
 							writeBuff0[0] = currBlockBegin[0];
-							file.rawWrite(writeBuff[0..3]);
+							file.rawWrite(writeBuff[0..1]);
+							file.rawWrite(writeBuff0[0..1]);
 						}else{		//literal block
 							ubyte blockLength;
 							
@@ -426,7 +432,8 @@ public class TGA : Image, ImageMetadata{
 							}
 							blockLength--;
 							writeBuff[0] = blockLength;
-							file.rawWrite(writeBuff[0..((blockLength * 4) + 5)]);
+							file.rawWrite(writeBuff[0..1]);
+							file.rawWrite(writeBuff0[0..(blockLength + 1)]);
 						}
 					}
 					break;
@@ -498,6 +505,11 @@ public class TGA : Image, ImageMetadata{
 						}
 					}
 					break;
+			}
+			version(unittest){
+				import std.conv : to;
+				assert(pixelCount == header.width * header.height, "Required size: " ~ to!string(header.width * 
+						header.height) ~ " Current size:" ~ to!string(pixelCount));
 			}
 		}
 		//write most of the data into the file
