@@ -1,7 +1,23 @@
+/*
+ * dimage - base.d
+ * by Laszlo Szeremi
+ *
+ * Copyright under Boost Software License.
+ */
+
 module dimage.base;
 
 import std.bitmanip;
 
+/**
+ * Interface for image orientation for files that support them.
+ */
+public interface ImageOrientation{
+	public @property bool rightHandOrientation() inout;
+	public @property bool topSideOrientation() inout;
+	public void flipVertical();
+	public void flipHorizontal();
+}
 /**
  * Interface for accessing metadata within images.
  * Any metadata that's not supported should return null.
@@ -53,8 +69,8 @@ abstract class Image{
 	protected ubyte mod;	///used for fast access of indexes
 	protected ubyte shift;	///used for fast access of indexes
 	
-	abstract ushort width() @nogc @safe @property const;
-	abstract ushort height() @nogc @safe @property const;
+	abstract int width() @nogc @safe @property const;
+	abstract int height() @nogc @safe @property const;
 	abstract bool isIndexed() @nogc @safe @property const;
 	abstract ubyte getBitdepth() @nogc @safe @property const;
 	abstract ubyte getPaletteBitdepth() @nogc @safe @property const;
@@ -75,8 +91,8 @@ abstract class Image{
 	/**
 	 * Reads a single 32bit pixel. If the image is indexed, a color lookup will be done.
 	 */
-	public Pixel32Bit readPixel(ushort x, ushort y){
-		if(x >= width || y >= height){
+	public Pixel32Bit readPixel(int x, int y){
+		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds");
 		}
 		if(isIndexed){
@@ -100,9 +116,28 @@ abstract class Image{
 		}
 	}
 	/**
+	 * Reads the given type of pixel from the image.
+	 * Throws an ImageFormatException, if the pixel does not match the requested format.
+	 */
+	public T readPixel(T)(int x, int y){
+		if(x >= width || y >= height || x < 0 || y < 0){
+			throw new ImageBoundsException("Image is being read out of bounds");
+		}
+		if(isIndexed){
+			ushort index = readPixelIndex!ushort(x, y);
+			return readPalette!(T)(index);
+		}else{
+			if(T.sizeof * 8 != getBitdepth){
+				throw new ImageFormatException("Requested format is invalid");
+			}
+			T data = (cast(T[])(cast(void[])imageData))[x + y * width];
+			return data;
+		}
+	}
+	/**
 	 * Reads an index, if the image isn't indexed throws an ImageFormatException.
 	 */
-	public T readPixelIndex(T = ubyte)(ushort x, ushort y)
+	public T readPixelIndex(T = ubyte)(int x, int y)
 			if(T.stringof == ushort.stringof || T.stringof == ubyte.stringof){
 		if(x >= width || y >= height){
 			throw new ImageBoundsException("Image is being read out of bounds!");
@@ -112,7 +147,7 @@ abstract class Image{
 		}
 		static if(T.stringof == ubyte.stringof){
 			if(getBitdepth == 16){
-				throw new ImageFormatException("Image isn't indexed!");
+				throw new ImageFormatException("Image is in 16 bit indexed format!");
 			}else if(getBitdepth == 8){
 				return imageData[x + y * width];
 			}else{
@@ -168,41 +203,55 @@ abstract class Image{
 		}
 	}
 	/**
+	 * Looks up the index on the palette, then returns the color value in the requested format.
+	 */
+	public T readPalette(T)(ushort index){
+		if(!isIndexed)
+			throw new ImageFormatException("Image isn't indexed!");
+		if(T.sizeof * 8 != getPaletteBitdepth)
+			throw new ImageFormatException("Palette format mismatch!");
+		if(paletteData.length / T.sizeof < index)
+			throw new PaletteBoundsException("Palette index is too high!");
+		T data = (cast(T[])(cast(void[])paletteData))[index];
+		return data;
+	}
+	/**
 	 * Writes a single pixel.
 	 * ubyte: most indexed formats.
 	 * ushort: all 16bit indexed formats.
 	 * Any other pixel structs are used for direct color.
 	 */
-	public T writePixel(T)(ushort x, ushort y, T pixel) if(T.stringof == ubyte.stringof || T.stringof == ushort.stringof
+	public T writePixel(T)(int x, int y, T pixel) if(T.stringof == ubyte.stringof || T.stringof == ushort.stringof
 			|| T.stringof == PixelRGBA5551.stringof || T.stringof == PixelRGB565.stringof || 
 			T.stringof == Pixel24Bit.stringof || T.stringof == Pixel32Bit.stringof){
 		if(x >= width || y >= height)
 			throw new ImageBoundsException("Image is being written out of bounds!");
 		
 		static if(T.stringof == ubyte.stringof || T.stringof == ushort.stringof){
-			if(!isIndexed)
-				throw new ImageFormatException("Image isn't indexed!");
+			/*if(!isIndexed)
+				throw new ImageFormatException("Image isn't indexed!");*/
 			
 			static if(T.stringof == ubyte.stringof)
 				if(getBitdepth == 16)
 					throw new ImageFormatException("Image cannot be written as 8 bit!");
-			static if(T.stringof == ushort.stringof)
+			static if(T.stringof == ushort.stringof){
 				if(getBitdepth <= 8)
 					throw new ImageFormatException("Image cannot be written as 16 bit!");
-			switch(getBitdepth){
-				case 8 :
-					return imageData[x + (y * width)] = pixel;
-				case 16 :
-					return (cast(ushort[])(cast(void[])imageData))[x + (y * width)] = pixel;
-				default:
-					const size_t offset = x + (y * width);
-					size_t offsetA = offset & ((1 << getBitdepth) - 1), offsetB = offset>>1;
-					if(getBitdepth == 2)
-						offsetB >>= 1;
-					else if (getBitdepth == 1)
-						offsetB >>= 2;
-					pixel <<= getPixelOrderBitshift[offsetA];
-					return imageData[offsetB] = (imageData[offsetB] & !getPixelOrder[offsetB]) | pixel;
+				return (cast(ushort[])(cast(void[])imageData))[x + (y * width)] = pixel;
+			}else{
+				switch(getBitdepth){
+					case 8 :
+						return imageData[x + (y * width)] = pixel;
+					default:
+						const size_t offset = x + (y * width);
+						size_t offsetA = offset & ((1 << getBitdepth) - 1), offsetB = offset>>1;
+						if(getBitdepth == 2)
+							offsetB >>= 1;
+						else if (getBitdepth == 1)
+							offsetB >>= 2;
+						pixel <<= getPixelOrderBitshift[offsetA];
+						return imageData[offsetB] = cast(ubyte)((imageData[offsetB] & !getPixelOrder[offsetB]) | pixel);
+				}
 			}
 		}else{
 			T[] pixels = cast(T[])(cast(void[])imageData);
@@ -211,6 +260,9 @@ abstract class Image{
 			return pixels[x + (y * width)] = pixel;
 		}
 	}
+	/**
+	 * Writes to the palette.
+	 */
 	/**
 	 * Returns the raw image data.
 	 */
@@ -344,6 +396,20 @@ class PaletteBoundsException : Exception{
  */
 class ImageFormatException : Exception{
     @nogc @safe pure nothrow this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable nextInChain = null)
+    {
+        super(msg, file, line, nextInChain);
+    }
+
+    @nogc @safe pure nothrow this(string msg, Throwable nextInChain, string file = __FILE__, size_t line = __LINE__)
+    {
+        super(msg, file, line, nextInChain);
+    }
+}
+/**
+ * Thrown if the file has a checksum error.
+ */
+public class ChecksumMismatchException : Exception{
+	@nogc @safe pure nothrow this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable nextInChain = null)
     {
         super(msg, file, line, nextInChain);
     }

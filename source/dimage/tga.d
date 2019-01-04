@@ -1,3 +1,10 @@
+/*
+ * dimage - tga.d
+ * by Laszlo Szeremi
+ *
+ * Copyright under Boost Software License.
+ */
+
 module dimage.tga;
 
 import std.bitmanip;
@@ -18,8 +25,163 @@ import core.stdc.string;
  * Accessing developer area is fully implemented, accessing extension area is partly implemented.
  */
 public class TGA : Image, ImageMetadata{
-	protected TGAHeader		header;
-	protected TGAFooter		footer;
+	/**
+	 * Implements Truevision Graphics bitmap header.
+	 */
+	public struct Header {
+	align(1) :
+		/**
+		 * Defines the type of the color map.
+		 */
+		public enum ColorMapType{
+			NoColorMapPresent		=	0,
+			ColorMapPresent			=	1,
+			/**
+			 * In this case, the palette is stored in a *.pal file, colorMapLength specifies the lenght of the filename, and the usual colorMap field instead stores the filename.
+			 */
+			ExtColorMap				=	128,	
+		}
+		/**
+		 * Defines the type of the image.
+		 */
+		enum ImageType : ubyte {
+			NoData					=	0,
+			UncompressedMapped		=	1,
+			UncompressedTrueColor	=	2,
+			UncompressedGrayscale	=	3,
+			RLEMapped				=	9,
+			RLETrueColor			=	10,
+			RLEGrayscale			=	11,
+		}
+		ubyte			idLength;           /// length in bytes
+		ubyte			colorMapType;		/// See ColorMapType enumerator
+		ubyte			imageType;			/// See ImageType enumerator
+		ushort			colorMapOffset;     /// index of first actual map entry
+		ushort			colorMapLength;     /// number of total entries (incl. skipped)
+		ubyte			colorMapDepth;      /// bits per pixel (entry)
+		ushort			xOrigin;			/// X origin of the image on the screen
+		ushort			yOrigin;			/// Y origin of the image on the screen
+		ushort			width;				/// Image width
+		ushort			height;				/// Image height
+		ubyte			pixelDepth;         /// bits per pixel
+		//imageDescriptor:
+		mixin(bitfields!(
+			ubyte, "alphaChannelBits", 4, 
+			bool , "rightSideOrigin", 1, 
+			bool , "topOrigin", 1, 
+			ubyte, "reserved", 2, 
+		));
+		public string toString(){
+			import std.conv : to;
+			return 
+			"idLength:" ~ to!string(idLength) ~ "\n" ~
+			"colorMapType:" ~ to!string(colorMapType) ~ "\n" ~
+			"imageType:" ~ to!string(imageType) ~ "\n" ~
+			"colorMapOffset:" ~ to!string(colorMapOffset) ~ "\n" ~
+			"colorMapLength:" ~ to!string(colorMapLength) ~ "\n" ~
+			"colorMapDepth:" ~ to!string(colorMapDepth) ~ "\n" ~
+			"xOrigin:" ~ to!string(xOrigin) ~ "\n" ~
+			"yOrigin:" ~ to!string(yOrigin) ~ "\n" ~
+			"width:" ~ to!string(width) ~ "\n" ~
+			"height:" ~ to!string(height) ~ "\n" ~
+			"pixelDepth:" ~ to!string(pixelDepth);
+		}
+	}
+	/**
+	 * Implements Truevision Graphics bitmap footer, which is used to indicate the locations of extra fields.
+	 */
+	struct Footer {
+	align(1) :
+		uint			extensionAreaOffset;				/// offset of the extensionArea, zero if doesn't exist
+		uint			developerAreaOffset;				/// offset of the developerArea, zero if doesn't exist
+		char[16]		signature = "TRUEVISION-XFILE";		/// if equals with "TRUEVISION-XFILE", it's the new format
+		char			reserved = '.';						/// should be always a dot
+		ubyte			terminator;							/// terminates the file, always null
+		///Returns true if it's a valid TGA footer
+		@property bool isValid(){
+			return signature == "TRUEVISION-XFILE";
+		}
+	}
+	/**
+	 * Contains extended data, mostly metadata.
+	 */
+	struct ExtArea{
+		/**
+		 * Stores attributes about the alpha channel.
+		 */
+	    enum Attributes : ubyte{
+	        NoAlpha                         =   0,
+	        UndefinedAlphaCanBeIgnored      =   1,
+	        UndefinedAlphaMustBePreserved   =   2,
+	        UsefulAlpha                     =   4,
+	        PreMultipliedAlpha              =   5
+	    }
+	align(1) :
+	    ushort      size = cast(ushort)ExtArea.sizeof;	///size of this field (should be ExtArea.sizeof)
+	    char[41]    authorName;				///Name of the author
+	    char[324]   authorComments;			///Stores author comments
+		/**
+		 * Stores the datetime in the following format
+		 * 0: Year
+		 * 1: Month
+		 * 2: Day
+		 * 3: Hour
+		 * 4: Minute
+		 * 5: Second
+		 */
+	    ushort[6]   dateTimeStamp;			
+	    char[41]    jobName;				///Name of the job
+		/**
+		 * Time of the job in the following format:
+		 * 0: Hours
+		 * 1: Minutes
+		 * 2: Seconds
+		 */
+	    ushort[3]   jobTime;
+	    char[41]    softwareID;				///Stores the name of the software
+	    ushort      softwareVersNum;		///Stores the version of the software in a decimal system in the following format: 000.0.0
+	    char        softwareVersChar;		///Stores the version of the software
+	    ubyte[4]    keyColor;				///Key color, mostly used for greenscreening and similar thing
+	    ushort      pixelWidth;				///Pixel width ratio
+	    ushort      pixelHeight;			///Pixel height ratio
+	    ushort      gammaNumerator;			///Gamma correction
+	    ushort      gammaDenominator;		///Gamma correction
+	    uint        colorCorrectionOffset;	///Color correction field. The library cannot process this information.
+	    uint        postageStampOffset;		///Thumbnail image offset
+	    uint        scanlineOffset;			///Fast access to scanline offsets. The library can create it and load it, but doesn't use it since it decompresses RLE images upon load
+	    ubyte       attributes;				///Information on the alpha channel
+	}
+	/**
+	 * Identifies the embedded data.
+	 */
+	struct DevAreaTag{
+	    ushort          reserved;       /// number of tags in the beginning
+	    /**
+	     * Identifier tag of the developer area field.
+	     * Supposedly the range of 32768 - 65535 is reserved by Truevision, however there are no information on whenever it was
+	     * used by them or not.
+	     */
+	    ushort          tag;            
+	    uint            offset;         /// offset into file
+	    uint            fieldSize;      /// field size in bytes
+	}
+	/**
+	 * Represents embedded data within the developer area
+	 */
+	struct DevArea{
+	    ubyte[] data;
+
+	    /**
+	     * Returns the data as a certain type (preferrably struct) if available
+	     */
+	    T get(T)(){
+	        if(T.sizeof == data.length){
+	            return cast(T)(cast(void[])data);
+	        }
+	    }
+	}
+	protected Header		header;
+	protected Footer		footer;
 	protected char[]		imageID;
 	protected ExtArea[]		extensionArea;
 	protected DevAreaTag[]	developerAreaTags;
@@ -30,7 +192,7 @@ public class TGA : Image, ImageMetadata{
 	/**
 	 * Creates a TGA object without a footer.
 	 */
-	public this(TGAHeader header, ubyte[] imageData, ubyte[] paletteData = null, char[] imageID = null){
+	public this(Header header, ubyte[] imageData, ubyte[] paletteData = null, char[] imageID = null){
 		this.header = header;
 		this.imageData = imageData;
 		this.paletteData = paletteData;
@@ -39,7 +201,7 @@ public class TGA : Image, ImageMetadata{
 	/**
 	 * Creates a TGA object with a footer.
 	 */
-	public this(TGAHeader header, TGAFooter footer, ubyte[] imageData, ubyte[] paletteData = null, char[] imageID = null){
+	public this(Header header, Footer footer, ubyte[] imageData, ubyte[] paletteData = null, char[] imageID = null){
 		this.header = header;
 		this.footer = footer;
 		this.imageData = imageData;
@@ -52,7 +214,7 @@ public class TGA : Image, ImageMetadata{
 	 */
 	public static TGA load(FILE = std.stdio.File, bool loadDevArea = false, bool loadExtArea = false)(ref FILE file){
 		import std.stdio;
-		ubyte[] loadRLEImageData(const ref TGAHeader header){
+		ubyte[] loadRLEImageData(const ref Header header){
 			size_t target = header.width * header.height;
 			const size_t bytedepth = (header.pixelDepth / 8);
 			target >>= header.pixelDepth < 8 ? 1 : 0;
@@ -119,10 +281,10 @@ public class TGA : Image, ImageMetadata{
 			assert(result.length == (header.width * header.height * bytedepth));
 			return result;
 		}
-		TGAHeader headerLoad;
-		ubyte[TGAHeader.sizeof] headerBuffer;
+		Header headerLoad;
+		ubyte[Header.sizeof] headerBuffer;
 		file.rawRead(headerBuffer);
-		headerLoad = *(cast(TGAHeader*)(cast(void*)headerBuffer.ptr));
+		headerLoad = *(cast(Header*)(cast(void*)headerBuffer.ptr));
 		char[] imageIDLoad;
 		imageIDLoad.length = headerLoad.idLength;
 		if(imageIDLoad.length) file.rawRead(imageIDLoad);
@@ -131,7 +293,7 @@ public class TGA : Image, ImageMetadata{
 		palette.length = headerLoad.colorMapLength * (headerLoad.colorMapDepth / 8);
 		if(palette.length) file.rawRead(palette);
 		ubyte[] image;
-		if(headerLoad.imageType >= TGAHeader.ImageType.RLEMapped && headerLoad.imageType <= TGAHeader.ImageType.RLEGrayscale){
+		if(headerLoad.imageType >= Header.ImageType.RLEMapped && headerLoad.imageType <= Header.ImageType.RLEGrayscale){
 			image = loadRLEImageData(headerLoad);
 		}else{
 			image.length = (headerLoad.width * headerLoad.height * headerLoad.pixelDepth) / 8;
@@ -139,8 +301,8 @@ public class TGA : Image, ImageMetadata{
 			if(image.length) file.rawRead(image);
 		}
 		static if(loadExtArea || loadDevArea){
-			TGAFooter footerLoad;
-			file.seek(TGAFooter.sizeof * -1, SEEK_END);
+			Footer footerLoad;
+			file.seek(Footer.sizeof * -1, SEEK_END);
 			footerLoad = file.rawRead([footerLoad]);
 			TGA result = new TGA(headerLoad, footerLoad, image, palette, imageID);
 			if(footerLoad.isValid){
@@ -516,7 +678,7 @@ public class TGA : Image, ImageMetadata{
 		file.rawWrite([header]);
 		file.rawWrite(imageID);
 		file.rawWrite(paletteData);
-		if(header.imageType >= TGAHeader.ImageType.RLEMapped && header.imageType <= TGAHeader.ImageType.RLEGrayscale){
+		if(header.imageType >= Header.ImageType.RLEMapped && header.imageType <= Header.ImageType.RLEGrayscale){
 			compressRLE();
 		}else{
 			file.rawWrite(imageData);
@@ -582,14 +744,14 @@ public class TGA : Image, ImageMetadata{
 			file.rawWrite([footer]);
 		}
 	}
-	override ushort width() @nogc @safe @property const{
+	override int width() @nogc @safe @property const{
 		return header.width;
 	}
-	override ushort height() @nogc @safe @property const{
+	override int height() @nogc @safe @property const{
 		return header.height;
 	}
 	override bool isIndexed() @nogc @safe @property const{
-		return header.colorMapType != TGAHeader.ColorMapType.NoColorMapPresent;
+		return header.colorMapType != Header.ColorMapType.NoColorMapPresent;
 	}
 	override ubyte getBitdepth() @nogc @safe @property const{
 		return header.pixelDepth;
@@ -598,7 +760,7 @@ public class TGA : Image, ImageMetadata{
 		return header.colorMapDepth;
 	}
 	override PixelFormat getPixelFormat() @nogc @safe @property const{
-		if(header.pixelDepth == 16 && header.colorMapType == TGAHeader.ColorMapType.NoColorMapPresent){
+		if(header.pixelDepth == 16 && header.colorMapType == Header.ColorMapType.NoColorMapPresent){
 			return PixelFormat.RGBA5551;
 		}else{
 			return PixelFormat.Undefined;
@@ -724,164 +886,95 @@ public class TGA : Image, ImageMetadata{
 	/**
 	 * Returns the header as a reference type.
 	 */
-	public ref TGAHeader getHeader() @nogc @safe nothrow{
+	public ref Header getHeader() @nogc @safe nothrow{
 		return header;
 	}
-}
-/**
- * Implements Truevision Graphics bitmap header.
- */
-public struct TGAHeader {
-align(1) :
 	/**
-	 * Defines the type of the color map.
+	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
 	 */
-	public enum ColorMapType{
-		NoColorMapPresent		=	0,
-		ColorMapPresent			=	1,
-		/**
-		 * In this case, the palette is stored in a *.pal file, colorMapLength specifies the lenght of the filename, and the usual colorMap field instead stores the filename.
-		 */
-		ExtColorMap				=	128,	
+	public void flipVertical(){
+		ubyte[] buffer;
+		const size_t workLength = (width * getBitdepth)>>3;
+		buffer.length = workLength;
+		ubyte* offset0 = imageData.ptr, offset1 = imageData.ptr + (height - 1) * workLength;
+		for(int y ; y < height>>1 ; y++){
+			memcpy(buffer.ptr, offset0, workLength);
+			memcpy(offset0, offset1, workLength);
+			memcpy(offset1, buffer.ptr, workLength);
+			offset0 += workLength;
+			offset1 -= workLength;
+		}
+		header.topOrigin = !header.topOrigin;
 	}
 	/**
-	 * Defines the type of the image.
+	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
 	 */
-	enum ImageType : ubyte {
-		NoData					=	0,
-		UncompressedMapped		=	1,
-		UncompressedTrueColor	=	2,
-		UncompressedGrayscale	=	3,
-		RLEMapped				=	9,
-		RLETrueColor			=	10,
-		RLEGrayscale			=	11,
+	public void flipHorizontal(){
+		if(isIndexed){
+			if(getBitdepth == 16){
+				for(int y ; y < height ; y++){
+					for(int x ; x < width>>1 ; x++){
+						const int x0 = width - x;
+						const ushort temp = readPixelIndex!(ushort)(x, y);
+						writePixel!(ushort)(x, y, readPixelIndex!(ushort)(x0, y));
+						writePixel!(ushort)(x0, y, temp);
+					}
+				}
+			}else{
+				for(int y ; y < height ; y++){
+					for(int x ; x < width>>1 ; x++){
+						const int x0 = width - x;
+						const ubyte temp = readPixelIndex!(ubyte)(x, y);
+						writePixel!(ubyte)(x, y, readPixelIndex!(ubyte)(x0, y));
+						writePixel!(ubyte)(x0, y, temp);
+					}
+				}
+			}
+		}else{
+			final switch(getBitdepth){
+				case 8:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const ubyte temp = readPixel!(ubyte)(x, y);
+							writePixel!(ubyte)(x, y, readPixel!(ubyte)(x0, y));
+							writePixel!(ubyte)(x0, y, temp);
+						}
+					}
+					break;
+				case 16:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const ushort temp = readPixel!(ushort)(x, y);
+							writePixel!(ushort)(x, y, readPixel!(ushort)(x0, y));
+							writePixel!(ushort)(x0, y, temp);
+						}
+					}
+					break;
+				case 24:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const Pixel24Bit temp = readPixel!(Pixel24Bit)(x, y);
+							writePixel!(Pixel24Bit)(x, y, readPixel!(Pixel24Bit)(x0, y));
+							writePixel!(Pixel24Bit)(x0, y, temp);
+						}
+					}
+					break;
+				case 32:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const Pixel32Bit temp = readPixel!(Pixel32Bit)(x, y);
+							writePixel!(Pixel32Bit)(x, y, readPixel!(Pixel32Bit)(x0, y));
+							writePixel!(Pixel32Bit)(x0, y, temp);
+						}
+					}
+					break;
+			}
+		}
 	}
-	ubyte			idLength;           /// length in bytes
-	ubyte			colorMapType;		/// See ColorMapType enumerator
-	ubyte			imageType;			/// See ImageType enumerator
-	ushort			colorMapOffset;     /// index of first actual map entry
-	ushort			colorMapLength;     /// number of total entries (incl. skipped)
-	ubyte			colorMapDepth;      /// bits per pixel (entry)
-	ushort			xOrigin;			/// X origin of the image on the screen
-	ushort			yOrigin;			/// Y origin of the image on the screen
-	ushort			width;				/// Image width
-	ushort			height;				/// Image height
-	ubyte			pixelDepth;         /// bits per pixel
-	//imageDescriptor:
-	mixin(bitfields!(
-		ubyte, "alphaChannelBits", 4, 
-		bool , "rightSideOrigin", 1, 
-		bool , "topOrigin", 1, 
-		ubyte, "reserved", 2, 
-	));
-	public string toString(){
-		import std.conv : to;
-		return 
-		"idLength:" ~ to!string(idLength) ~ "\n" ~
-		"colorMapType:" ~ to!string(colorMapType) ~ "\n" ~
-		"imageType:" ~ to!string(imageType) ~ "\n" ~
-		"colorMapOffset:" ~ to!string(colorMapOffset) ~ "\n" ~
-		"colorMapLength:" ~ to!string(colorMapLength) ~ "\n" ~
-		"colorMapDepth:" ~ to!string(colorMapDepth) ~ "\n" ~
-		"xOrigin:" ~ to!string(xOrigin) ~ "\n" ~
-		"yOrigin:" ~ to!string(yOrigin) ~ "\n" ~
-		"width:" ~ to!string(width) ~ "\n" ~
-		"height:" ~ to!string(height) ~ "\n" ~
-		"pixelDepth:" ~ to!string(pixelDepth);
-	}
-}
-/**
- * Implements Truevision Graphics bitmap footer, which is used to indicate the locations of extra fields.
- */
-struct TGAFooter {
-align(1) :
-	uint			extensionAreaOffset;				/// offset of the extensionArea, zero if doesn't exist
-	uint			developerAreaOffset;				/// offset of the developerArea, zero if doesn't exist
-	char[16]		signature = "TRUEVISION-XFILE";		/// if equals with "TRUEVISION-XFILE", it's the new format
-	char			reserved = '.';						/// should be always a dot
-	ubyte			terminator;							/// terminates the file, always null
-	///Returns true if it's a valid TGA footer
-	@property bool isValid(){
-		return signature == "TRUEVISION-XFILE";
-	}
-}
-/**
- * Contains extended data, mostly metadata.
- */
-struct ExtArea{
-	/**
-	 * Stores attributes about the alpha channel.
-	 */
-    enum Attributes : ubyte{
-        NoAlpha                         =   0,
-        UndefinedAlphaCanBeIgnored      =   1,
-        UndefinedAlphaMustBePreserved   =   2,
-        UsefulAlpha                     =   4,
-        PreMultipliedAlpha              =   5
-    }
-align(1) :
-    ushort      size = cast(ushort)ExtArea.sizeof;	///size of this field (should be ExtArea.sizeof)
-    char[41]    authorName;				///Name of the author
-    char[324]   authorComments;			///Stores author comments
-	/**
-	 * Stores the datetime in the following format
-	 * 0: Year
-	 * 1: Month
-	 * 2: Day
-	 * 3: Hour
-	 * 4: Minute
-	 * 5: Second
-	 */
-    ushort[6]   dateTimeStamp;			
-    char[41]    jobName;				///Name of the job
-	/**
-	 * Time of the job in the following format:
-	 * 0: Hours
-	 * 1: Minutes
-	 * 2: Seconds
-	 */
-    ushort[3]   jobTime;
-    char[41]    softwareID;				///Stores the name of the software
-    ushort      softwareVersNum;		///Stores the version of the software in a decimal system in the following format: 000.0.0
-    char        softwareVersChar;		///Stores the version of the software
-    ubyte[4]    keyColor;				///Key color, mostly used for greenscreening and similar thing
-    ushort      pixelWidth;				///Pixel width ratio
-    ushort      pixelHeight;			///Pixel height ratio
-    ushort      gammaNumerator;			///Gamma correction
-    ushort      gammaDenominator;		///Gamma correction
-    uint        colorCorrectionOffset;	///Color correction field. The library cannot process this information.
-    uint        postageStampOffset;		///Thumbnail image offset
-    uint        scanlineOffset;			///Fast access to scanline offsets. The library can create it and load it, but doesn't use it since it decompresses RLE images upon load
-    ubyte       attributes;				///Information on the alpha channel
-}
-/**
- * Identifies the embedded data.
- */
-struct DevAreaTag{
-    ushort          reserved;       /// number of tags in the beginning
-    /**
-     * Identifier tag of the developer area field.
-     * Supposedly the range of 32768 - 65535 is reserved by Truevision, however there are no information on whenever it was
-     * used by them or not.
-     */
-    ushort          tag;            
-    uint            offset;         /// offset into file
-    uint            fieldSize;      /// field size in bytes
-}
-/**
- * Represents embedded data within the developer area
- */
-struct DevArea{
-    ubyte[] data;
-
-    /**
-     * Returns the data as a certain type (preferrably struct) if available
-     */
-    T get(T)(){
-        if(T.sizeof == data.length){
-            return cast(T)(cast(void[])data);
-        }
-    }
 }
 
 unittest{
@@ -897,7 +990,7 @@ unittest{
 			}
 		}
 	}
-	assert(TGAHeader.sizeof == 18);
+	assert(TGA.Header.sizeof == 18);
 	//void[] tempStream;
 	//test 8 bit RLE load for 8 bit greyscale and indexed
 	{
@@ -911,7 +1004,7 @@ unittest{
 		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
 		compareImages(greyscaleUnc, greyscaleRLE);
 		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLEGrayscale;
 		VFile virtualFile;// = VFile(tempStream);
 		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
 		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
@@ -933,7 +1026,7 @@ unittest{
 		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
 		compareImages(greyscaleUnc, greyscaleRLE);
 		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLEMapped;
 		VFile virtualFile;// = VFile(tempStream);
 		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
 		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
@@ -955,7 +1048,7 @@ unittest{
 		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
 		compareImages(greyscaleUnc, greyscaleRLE);
 		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLETrueColor;
 		VFile virtualFile;// = VFile(tempStream);
 		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
 		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
@@ -977,7 +1070,7 @@ unittest{
 		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
 		compareImages(greyscaleUnc, greyscaleRLE);
 		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLETrueColor;
 		VFile virtualFile;// = VFile(tempStream);
 		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
 		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
@@ -999,7 +1092,7 @@ unittest{
 		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
 		compareImages(greyscaleUnc, greyscaleRLE);
 		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-		greyscaleUnc.getHeader.imageType = TGAHeader.ImageType.RLEGrayscale;
+		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLETrueColor;
 		VFile virtualFile;// = VFile(tempStream);
 		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
 		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
