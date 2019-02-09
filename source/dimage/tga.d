@@ -246,7 +246,7 @@ public class TGA : Image, ImageMetadata{
 						}else{//literal block
 							dataBuffer[0] &= 0b0111_1111;
 							ubyte[] literalBlock;
-							literalBlock.length = dataBuffer[0];
+							literalBlock.length = dataBuffer[0] + 1;
 							file.rawRead(literalBlock);
 							result ~= dataBuffer[1] ~ literalBlock;
 							target--;
