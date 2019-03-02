@@ -12,6 +12,7 @@ import dimage.base;
 import zlib = std.zlib;
 import std.digest.crc;
 import std.bitmanip;
+import std.algorithm.mutation : reverse;
 static import std.stdio;
 import std.string : fromStringz;
 import core.stdc.stdint;
@@ -107,7 +108,7 @@ public class PNG : Image{
 	 * Loads a PNG file.
 	 * Currently interlaced mode is unsupported.
 	 */
-	static PNG load(F = std.stdio.File)(ref F file){
+	static PNG load(F = std.stdio.File, bool chksmTest = true)(ref F file){
 		PNG result = new PNG();
 		bool iend;
 		ubyte[] readBuffer;
@@ -147,9 +148,10 @@ public class PNG : Image{
 				crc = crc32Of(readBuffer);
 				readBuffer.length = 4;
 				file.rawRead(readBuffer);
-				/*for(int i ; i < 4 ; i++)
-					if(readBuffer[i] != crc[i])
-						throw new ChecksumMismatchException("Checksum error");*/
+				readBuffer.reverse;
+				static if(chksmTest)
+					if(readBuffer != crc)
+						throw new ChecksumMismatchException("Checksum error");
 			}
 			readBuffer.length = 8;
 		}while(!iend);
@@ -168,7 +170,7 @@ public class PNG : Image{
 	 * Currently interlaced mode is unsupported.
 	 */
 	public void save(F = std.stdio.File)(ref F file, int compLevel = 9){
-		ubyte[4] crc;
+		ubyte[] crc;
 		//write PNG signature into file
 		file.rawWrite(PNG_SIGNATURE);
 		//write Header into file
@@ -179,7 +181,7 @@ public class PNG : Image{
 		writeBuffer.length = 0;
 		writeBuffer ~= cast(void[])[header.nativeToBigEndian];
 		file.rawWrite(writeBuffer);
-		crc = crc32Of(writeBuffer);
+		crc = crc32Of(writeBuffer).dup.reverse;
 		file.rawWrite(crc);
 		//write palette into file if exists
 		if(paletteData.length){
@@ -187,7 +189,7 @@ public class PNG : Image{
 			writeBuffer ~= cast(void[])[Chunk(cast(uint)paletteData.length, PALETTE_INIT).nativeToBigEndian];
 			file.rawWrite(writeBuffer);
 			file.rawWrite(paletteData);
-			crc = crc32Of(paletteData);
+			crc = crc32Of(paletteData).dup.reverse;
 			file.rawWrite(crc);
 		}
 		//compress imagedata if needed, then write it into the file
@@ -197,7 +199,7 @@ public class PNG : Image{
 			writeBuffer ~= cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
 			file.rawWrite(writeBuffer);
 			file.rawWrite(secBuf);
-			crc = crc32Of(secBuf);
+			crc = crc32Of(secBuf).dup.reverse;
 			file.rawWrite(crc);
 		}
 		//write IEND chunk
