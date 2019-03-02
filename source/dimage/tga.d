@@ -246,7 +246,7 @@ public class TGA : Image, ImageMetadata{
 						}else{//literal block
 							dataBuffer[0] &= 0b0111_1111;
 							ubyte[] literalBlock;
-							literalBlock.length = dataBuffer[0] + 1;
+							literalBlock.length = dataBuffer[0]++;
 							file.rawRead(literalBlock);
 							result ~= dataBuffer[1] ~ literalBlock;
 							target--;
@@ -272,10 +272,10 @@ public class TGA : Image, ImageMetadata{
 				}else{//literal block
 					dataBuffer[0] &= 0b0111_1111;
 					ubyte[] literalBlock;
-					literalBlock.length = dataBuffer[0] * bytedepth;
+					literalBlock.length = dataBuffer[0]++ * bytedepth;
 					file.rawRead(literalBlock);
 					result ~= dataBuffer[1..$] ~ literalBlock;
-					target--;
+					target -= dataBuffer[0];
 				}
 			}
 			assert(result.length == (header.width * header.height * bytedepth));

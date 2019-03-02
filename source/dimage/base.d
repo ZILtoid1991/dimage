@@ -139,7 +139,7 @@ abstract class Image{
 	 */
 	public T readPixelIndex(T = ubyte)(int x, int y)
 			if(T.stringof == ushort.stringof || T.stringof == ubyte.stringof){
-		if(x >= width || y >= height){
+		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds!");
 		}
 		if(!isIndexed){
