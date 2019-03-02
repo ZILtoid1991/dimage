@@ -145,7 +145,7 @@ public class PNG : Image{
 			}
 			//calculate crc
 			if(curChunk.dataLength){
-				crc = crc32Of(readBuffer);
+				crc = crc32Of((cast(ubyte[])curChunk.identifier) ~ readBuffer);
 				readBuffer.length = 4;
 				file.rawRead(readBuffer);
 				readBuffer.reverse;
@@ -181,7 +181,7 @@ public class PNG : Image{
 		writeBuffer.length = 0;
 		writeBuffer ~= cast(void[])[header.nativeToBigEndian];
 		file.rawWrite(writeBuffer);
-		crc = crc32Of(writeBuffer).dup.reverse;
+		crc = crc32Of((cast(ubyte[])HEADER_INIT) ~ writeBuffer).dup.reverse;
 		file.rawWrite(crc);
 		//write palette into file if exists
 		if(paletteData.length){
@@ -189,7 +189,7 @@ public class PNG : Image{
 			writeBuffer ~= cast(void[])[Chunk(cast(uint)paletteData.length, PALETTE_INIT).nativeToBigEndian];
 			file.rawWrite(writeBuffer);
 			file.rawWrite(paletteData);
-			crc = crc32Of(paletteData).dup.reverse;
+			crc = crc32Of((cast(ubyte[])PALETTE_INIT) ~ paletteData).dup.reverse;
 			file.rawWrite(crc);
 		}
 		//compress imagedata if needed, then write it into the file
@@ -199,7 +199,7 @@ public class PNG : Image{
 			writeBuffer ~= cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
 			file.rawWrite(writeBuffer);
 			file.rawWrite(secBuf);
-			crc = crc32Of(secBuf).dup.reverse;
+			crc = crc32Of((cast(ubyte[])DATA_INIT) ~ secBuf).dup.reverse;
 			file.rawWrite(crc);
 		}
 		//write IEND chunk
@@ -248,12 +248,12 @@ unittest{
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
 		std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
 		a.save(output);
-		/*VFile virtualIndexedPNGFile;
+		VFile virtualIndexedPNGFile;
 		a.save(virtualIndexedPNGFile);
 		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
 		PNG b = PNG.load(virtualIndexedPNGFile);
 		std.stdio.writeln("Image restored from virtual file");
 		compareImages(a, b);
-		std.stdio.writeln("The two images' output match");*/
+		std.stdio.writeln("The two images' output match");
 	}
 }

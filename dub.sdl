@@ -5,5 +5,5 @@ copyright "Copyright © 2018, Laszlo Szeremi"
 license "Boost"
 target "library"
 configuration "unittest"{
-	dependency "vfile" version="0.1.0"
+	dependency "vfile" version="*"
 }
