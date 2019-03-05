@@ -99,7 +99,7 @@ public class TGA : Image, ImageMetadata{
 		ubyte			terminator;							/// terminates the file, always null
 		///Returns true if it's a valid TGA footer
 		@property bool isValid(){
-			return signature == "TRUEVISION-XFILE";
+			return signature == "TRUEVISION-XFILE" && reserved == '.' && terminator == 0;
 		}
 	}
 	/**
@@ -744,26 +744,51 @@ public class TGA : Image, ImageMetadata{
 			file.rawWrite([footer]);
 		}
 	}
-	override int width() @nogc @safe @property const{
+	override int width() @nogc @safe @property const pure{
 		return header.width;
 	}
-	override int height() @nogc @safe @property const{
+	override int height() @nogc @safe @property const pure{
 		return header.height;
 	}
-	override bool isIndexed() @nogc @safe @property const{
+	override bool isIndexed() @nogc @safe @property const pure{
 		return header.colorMapType != Header.ColorMapType.NoColorMapPresent;
 	}
-	override ubyte getBitdepth() @nogc @safe @property const{
+	override ubyte getBitdepth() @nogc @safe @property const pure{
 		return header.pixelDepth;
 	}
-	override ubyte getPaletteBitdepth() @nogc @safe @property const{
+	override ubyte getPaletteBitdepth() @nogc @safe @property const pure{
 		return header.colorMapDepth;
 	}
-	override PixelFormat getPixelFormat() @nogc @safe @property const{
-		if(header.pixelDepth == 16 && header.colorMapType == Header.ColorMapType.NoColorMapPresent){
-			return PixelFormat.RGBA5551;
-		}else{
+	override PixelFormat getPixelFormat() @nogc @safe @property const pure{
+		if(!Header.ColorMapType.NoColorMapPresent){
 			return PixelFormat.Undefined;
+		}else{
+			switch(header.pixelDepth){
+				case 16:
+					return PixelFormat.RGBA5551;
+				case 24:
+					return PixelFormat.RGB888;
+				case 32:
+					return PixelFormat.ARGB8888;
+				default:
+					return PixelFormat.Undefined;
+			}
+		}
+	}
+	override PixelFormat getPalettePixelFormat() @nogc @safe @property const pure{
+		if(Header.ColorMapType.NoColorMapPresent){
+			return PixelFormat.Undefined;
+		}else{
+			switch(header.pixelDepth){
+				case 16:
+					return PixelFormat.RGBA5551;
+				case 24:
+					return PixelFormat.RGB888;
+				case 32:
+					return PixelFormat.ARGB8888;
+				default:
+					return PixelFormat.Undefined;
+			}
 		}
 	}
 	/**

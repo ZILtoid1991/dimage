@@ -69,12 +69,13 @@ abstract class Image{
 	protected ubyte mod;	///used for fast access of indexes
 	protected ubyte shift;	///used for fast access of indexes
 	
-	abstract int width() @nogc @safe @property const;
-	abstract int height() @nogc @safe @property const;
-	abstract bool isIndexed() @nogc @safe @property const;
-	abstract ubyte getBitdepth() @nogc @safe @property const;
-	abstract ubyte getPaletteBitdepth() @nogc @safe @property const;
-	abstract PixelFormat getPixelFormat() @nogc @safe @property const;
+	abstract int width() @nogc @safe @property const pure;
+	abstract int height() @nogc @safe @property const pure;
+	abstract bool isIndexed() @nogc @safe @property const pure;
+	abstract ubyte getBitdepth() @nogc @safe @property const pure;
+	abstract ubyte getPaletteBitdepth() @nogc @safe @property const pure;
+	abstract PixelFormat getPixelFormat() @nogc @safe @property const pure;
+	abstract PixelFormat getPalettePixelFormat() @nogc @safe @property const pure;
 	/**
 	 * Returns the pixel order for bitdepths less than 8. Almost excusively used for indexed bitmaps.
 	 * Returns null if ordering not needed.
@@ -188,17 +189,17 @@ abstract class Image{
 			case 16:
 				if(index<<1 > paletteData.length)
 					throw new PaletteBoundsException("Palette index is too high!");
-				PixelRGBA5551 data = (cast(PixelRGBA5551[])(cast(void[])imageData))[index];
+				PixelRGBA5551 data = (cast(PixelRGBA5551[])(cast(void[])paletteData))[index];
 				return Pixel32Bit(data);
 			case 24:
 				if(index * 3 > paletteData.length)
 					throw new PaletteBoundsException("Palette index is too high!");
-				Pixel24Bit data = (cast(Pixel24Bit[])(cast(void[])imageData))[index];
+				Pixel24Bit data = (cast(Pixel24Bit[])(cast(void[])paletteData))[index];
 				return Pixel32Bit(data);
 			case 32:
 				if(index<<2 > paletteData.length)
 					throw new PaletteBoundsException("Palette index is too high!");
-				Pixel32Bit data = (cast(Pixel32Bit[])(cast(void[])imageData))[index];
+				Pixel32Bit data = (cast(Pixel32Bit[])(cast(void[])paletteData))[index];
 				return data;
 		}
 	}
@@ -277,19 +278,21 @@ abstract class Image{
 	}
 }
 
-struct Pixel32Bit {
+alias Pixel32Bit = Pixel32BitARGB;
+
+struct Pixel32BitARGB {
     union{
         ubyte[4] bytes;     /// BGRA
         uint base;          /// Direct address
     }
 	///Red
-    @property ref auto r() inout { return bytes[2]; }
+    @nogc @property pure ref auto r() inout { return bytes[2]; }
 	///Green
-    @property ref auto g() inout { return bytes[1]; }
+    @nogc @property pure ref auto g() inout { return bytes[1]; }
 	///Blue
-    @property ref auto b() inout { return bytes[0]; }
+    @nogc @property pure ref auto b() inout { return bytes[0]; }
 	///Alpha
-    @property ref auto a() inout { return bytes[3]; }
+    @nogc @property pure ref auto a() inout { return bytes[3]; }
     @nogc this(ubyte[4] bytes){
         this.bytes = bytes;
     }
@@ -309,7 +312,7 @@ struct Pixel32Bit {
         bytes[0] = cast(ubyte)(p.b<<3 | p.b>>2);
         bytes[1] = cast(ubyte)(p.g<<2 | p.g>>4);
         bytes[2] = cast(ubyte)(p.r<<3 | p.r>>2);
-        bytes[3] = p.a ? 0xFF : 0x00;
+        bytes[3] = 0xFF;
     }
     @nogc this(Pixel24Bit p){
         bytes[0] = p.b;
@@ -333,34 +336,44 @@ struct PixelRGBA5551{
 	}
 }
 /**
- * 16 Bit colorspace with no alpha.
+ * 16 Bit RGB565 colorspace with no alpha.
  */
 struct PixelRGB565{
 	union{
 		ushort base;
 		mixin(bitfields!(
 			ubyte, "b", 5,
-			ubyte, "g", 5,
+			ubyte, "g", 6,
 			ubyte, "r", 5,
-			bool, "a", 1,
 		));
 	}
 }
-
+/**
+ * 24 Bit colorspace
+ */
 align(1) struct Pixel24Bit {
     ubyte[3] bytes;
-    @property ref auto r() inout { return bytes[2]; }
-    @property ref auto g() inout { return bytes[1]; }
-    @property ref auto b() inout { return bytes[0]; }
+    @nogc @property pure ref auto r() inout { return bytes[2]; }
+    @nogc @property pure ref auto g() inout { return bytes[1]; }
+    @nogc @property pure ref auto b() inout { return bytes[0]; }
+	@nogc @property pure uint base(){ return 0xff_00_00_00 | bytes[2] | bytes[1] | bytes[0]; }
 }
 /**
  * Pixel formats where its needed.
+ * Undefined should be used for all indexed bitmaps, except 16 bit big endian ones.
+ * Lower 16 bits should be used for general identification, upper 16 bits are general identificators (endianness, etc)
  */
 enum PixelFormat : uint{
-	RGBA5551		=	1,
-	RGBX5551		=	2,
-	RGB565			=	3,
-	Undefined		=	uint.max,
+	RGBA5551		=	0x1,
+	RGBX5551		=	0x2,
+	RGB565			=	0x3,
+	RGB888			=	0x20,
+	RGBA8888		=	0x40,
+	RGBX8888		=	0x41,
+	ARGB8888		=	0x42,
+	XRGB8888		=	0x43,
+	BigEndian		=	0x00_01_00_00,		///Always little endian if bit not set
+	Undefined		=	0,
 }
 
 /**

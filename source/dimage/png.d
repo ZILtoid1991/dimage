@@ -111,6 +111,7 @@ public class PNG : Image{
 	static PNG load(F = std.stdio.File, bool chksmTest = true)(ref F file){
 		PNG result = new PNG();
 		bool iend;
+		auto decompressor = new zlib.UnCompress();
 		ubyte[] readBuffer;
 		readBuffer.length = 8;
 		file.rawRead(readBuffer);
@@ -134,7 +135,10 @@ public class PNG : Image{
 					result.paletteData = readBuffer.dup;
 					break;
 				case DATA_INIT:
-					result.imageData ~= readBuffer.dup;
+					//if(result.header.compression)
+					result.imageData ~= cast(ubyte[])decompressor.uncompress(cast(void[])readBuffer);
+					//else
+					//	result.imageData ~= readBuffer.dup;
 					break;
 				case END_INIT:
 					iend = true;
@@ -144,24 +148,28 @@ public class PNG : Image{
 					break;
 			}
 			//calculate crc
-			if(curChunk.dataLength){
-				crc = crc32Of((cast(ubyte[])curChunk.identifier) ~ readBuffer);
-				readBuffer.length = 4;
-				file.rawRead(readBuffer);
-				readBuffer.reverse;
-				static if(chksmTest)
-					if(readBuffer != crc)
-						throw new ChecksumMismatchException("Checksum error");
-			}
+			//if(curChunk.dataLength){
+			crc = crc32Of((cast(ubyte[])curChunk.identifier) ~ readBuffer);
+			readBuffer.length = 4;
+			file.rawRead(readBuffer);
+			readBuffer.reverse;
+			static if(chksmTest)
+				if(readBuffer != crc)
+					throw new ChecksumMismatchException("Checksum error");
+			//}
 			readBuffer.length = 8;
 		}while(!iend);
-		result.imageData = cast(ubyte[])zlib.uncompress(result.imageData, (result.header.width * result.header.height * 
-				result.header.bitDepth)/8);
+
+		/+result.imageData = cast(ubyte[])zlib.uncompress(result.imageData, (result.header.width * result.header.height * 
+				result.header.bitDepth)/8);+/
+		//if(result.header.compression){
+		result.imageData ~= cast(ubyte[])decompressor.flush();
+		//}
 		version(unittest){
 			std.stdio.writeln(result.header.toString);
 			std.stdio.writeln(result.imageData.length);
 		}
-		assert(result.imageData.length >= (result.header.width * result.header.height * result.header.bitDepth)/8);
+		//assert(result.imageData.length == (result.header.width * result.header.height * result.header.bitDepth)/8);
 		result.imageData.length = (result.header.width * result.header.height * result.header.bitDepth)/8;
 		return result;
 	}
@@ -194,37 +202,69 @@ public class PNG : Image{
 		}
 		//compress imagedata if needed, then write it into the file
 		{	
-			ubyte[] secBuf = zlib.compress(cast(void[])imageData, compLevel);
+			auto compressor = new zlib.Compress(compLevel);
+			//ubyte[] secBuf = zlib.compress(cast(void[])imageData, compLevel);
+			// = compressor.compress(cast(void[])imageData);
+			//secBuf ~= compressor.flush();
 			writeBuffer.length = 0;
-			writeBuffer ~= cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
-			file.rawWrite(writeBuffer);
-			file.rawWrite(secBuf);
-			crc = crc32Of((cast(ubyte[])DATA_INIT) ~ secBuf).dup.reverse;
-			file.rawWrite(crc);
+			size_t pos, cnt;
+			const size_t pitch = (header.width * header.bitDepth) / 8;
+			void[] secBuf;
+			while(pos < imageData.length){
+				ubyte[] slice = pos < imageData.length ? imageData[pos..(pos + pitch)] : imageData[pos..$];
+				secBuf ~= compressor.compress(cast(void[])slice);
+				if(secBuf.length > 2048){
+					writeBuffer = cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
+					file.rawWrite(writeBuffer);
+					file.rawWrite(secBuf);
+					crc = crc32Of((cast(ubyte[])DATA_INIT) ~ secBuf).dup.reverse;
+					file.rawWrite(crc);
+					secBuf.length = 0;
+				}
+				pos += pitch;
+				cnt++;
+			}
+			assert(cnt == header.height);
+			//writeBuffer.length = 0;
+			secBuf ~= compressor.flush();
+			if(secBuf.length){
+				writeBuffer = cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
+				file.rawWrite(writeBuffer);
+				file.rawWrite(secBuf);
+				crc = crc32Of((cast(ubyte[])DATA_INIT) ~ secBuf).dup.reverse;
+				file.rawWrite(crc);
+			}
+			
 		}
 		//write IEND chunk
-		writeBuffer.length = 0;
-		writeBuffer ~= cast(void[])[Chunk(0, END_INIT).nativeToBigEndian];
+		//writeBuffer.length = 0;
+		writeBuffer = cast(void[])[Chunk(0, END_INIT).nativeToBigEndian];
 		file.rawWrite(writeBuffer);
 		file.rawWrite(PNG_CLOSER);
 	}
-	override int width() @nogc @safe @property const{
+	override int width() @nogc @safe @property const pure{
 		return header.width;
 	}
-	override int height() @nogc @safe @property const{
+	override int height() @nogc @safe @property const pure{
 		return header.height;
 	}
-	override bool isIndexed() @nogc @safe @property const{
+	override bool isIndexed() @nogc @safe @property const pure{
 		return header.colorType == 3;
 	}
-	override ubyte getBitdepth() @nogc @safe @property const{
+	override ubyte getBitdepth() @nogc @safe @property const pure{
 		return header.bitDepth;
 	}
-	override ubyte getPaletteBitdepth() @nogc @safe @property const{
+	override ubyte getPaletteBitdepth() @nogc @safe @property const pure{
 		return isIndexed ? 24 : 0;
 	}
-	override PixelFormat getPixelFormat() @nogc @safe @property const{
+	override PixelFormat getPixelFormat() @nogc @safe @property const pure{
 		return header.bitDepth == 16 ? PixelFormat.RGBX5551 : PixelFormat.Undefined;
+	}
+	override PixelFormat getPalettePixelFormat() @nogc @safe @property const pure{
+		return PixelFormat.RGB888;
+	}
+	public ref Header getHeader() @nogc @safe{
+		return header;
 	}
 }
 
