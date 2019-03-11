@@ -9,11 +9,12 @@ module dimage.png;
 
 import dimage.base;
 
-import zlib = std.zlib;
+import zlib = etc.c.zlib;
 import std.digest.crc;
 import std.bitmanip;
 import std.algorithm.mutation : reverse;
 static import std.stdio;
+static import std.string;
 import std.string : fromStringz;
 import core.stdc.stdint;
 /**
@@ -54,16 +55,27 @@ public class PNG : Image{
 		}
 	}
 	/**
+	 * Represents the possible types for PNG
+	 * While bitmasking could be used, not every combination are valid
+	 */
+	enum ColorType : ubyte{
+		Greyscale			=	0,
+		TrueColor			=	2,
+		Indexed				=	3,
+		GreyscaleWithAlpha	=	4,
+		TrueColorWithAlpha	=	6,
+	}
+	/**
 	 * Contains most data related to PNG files.
 	 */
 	struct Header{
-		uint width;        /// Width of image in pixels 
-    	uint height;       /// Height of image in pixels 
-    	ubyte bitDepth;      /// Bits per pixel or per sample
-    	ubyte colorType;     /// Color interpretation indicator
-    	ubyte compression;   /// Compression type indicator
-    	ubyte filter;        /// Filter type indicator
-    	ubyte interlace;     /// Type of interlacing scheme used
+		uint		width;			/// Width of image in pixels 
+    	uint		height;			/// Height of image in pixels 
+    	ubyte		bitDepth;		/// Bits per pixel or per sample
+    	ColorType	colorType;		/// Color interpretation indicator
+    	ubyte		compression;	/// Compression type indicator
+    	ubyte		filter;			/// Filter type indicator
+    	ubyte		interlace;		/// Type of interlacing scheme used
 		/**
 		 * Converts the struct to little endian on systems that need them.
 		 */
@@ -97,7 +109,7 @@ public class PNG : Image{
 		}
 	}
 	protected Header header;
-	public this(int width, int height, ubyte bitDepth, ubyte colorType, ubyte compression, ubyte[] imageData, 
+	public this(int width, int height, ubyte bitDepth, ColorType colorType, ubyte compression, ubyte[] imageData, 
 			ubyte[] paletteData = []){
 		header = Header(width, height, bitDepth, colorType, compression, 0, 0);
 	}
@@ -109,9 +121,21 @@ public class PNG : Image{
 	 * Currently interlaced mode is unsupported.
 	 */
 	static PNG load(F = std.stdio.File, bool chksmTest = true)(ref F file){
+		//import std.zlib : UnCompress;
 		PNG result = new PNG();
 		bool iend;
-		auto decompressor = new zlib.UnCompress();
+		//auto decompressor = new UnCompress();
+		//initialize decompressor
+		int ret, flush;
+    	//uint have;
+    	zlib.z_stream strm;
+		strm.zalloc = null;
+		strm.zfree = null;
+		strm.opaque = null;
+		ret = zlib.inflateInit(&strm);
+		if(ret != zlib.Z_OK)
+			throw new Exception("Decompressor initialization error");
+
 		ubyte[] readBuffer;
 		readBuffer.length = 8;
 		file.rawRead(readBuffer);
@@ -130,15 +154,27 @@ public class PNG : Image{
 				case HEADER_INIT:
 					result.header = *(cast(Header*)(cast(void*)readBuffer.ptr));
 					result.header.bigEndianToNative;
+					result.imageData.length = (result.header.width * result.header.height * result.getBitdepth) / 8;
+					strm.next_out = result.imageData.ptr;
+					strm.avail_out = cast(uint)result.imageData.length;
 					break;
 				case PALETTE_INIT:
 					result.paletteData = readBuffer.dup;
 					break;
 				case DATA_INIT:
 					//if(result.header.compression)
-					result.imageData ~= cast(ubyte[])decompressor.uncompress(cast(void[])readBuffer);
+					//result.imageData ~= cast(ubyte[])decompressor.uncompress(cast(void[])readBuffer);
 					//else
 					//	result.imageData ~= readBuffer.dup;
+					strm.next_in = readBuffer.ptr;
+					strm.avail_in = cast(uint)readBuffer.length;
+					ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
+
+					if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
+						version(unittest) std.stdio.writeln(ret);
+						zlib.inflateEnd(&strm);
+						throw new Exception("Decompression error");
+					}
 					break;
 				case END_INIT:
 					iend = true;
@@ -159,11 +195,11 @@ public class PNG : Image{
 			//}
 			readBuffer.length = 8;
 		}while(!iend);
-
+		zlib.inflateEnd(&strm);//should have no data remaining
 		/+result.imageData = cast(ubyte[])zlib.uncompress(result.imageData, (result.header.width * result.header.height * 
 				result.header.bitDepth)/8);+/
 		//if(result.header.compression){
-		result.imageData ~= cast(ubyte[])decompressor.flush();
+		//result.imageData ~= cast(ubyte[])decompressor.flush();
 		//}
 		version(unittest){
 			std.stdio.writeln(result.header.toString);
@@ -177,7 +213,7 @@ public class PNG : Image{
 	 * Saves the file to the disk.
 	 * Currently interlaced mode is unsupported.
 	 */
-	public void save(F = std.stdio.File)(ref F file, int compLevel = 9){
+	public void save(F = std.stdio.File, size_t writeblocksize = 65536)(ref F file, int compLevel = 9){
 		ubyte[] crc;
 		//write PNG signature into file
 		file.rawWrite(PNG_SIGNATURE);
@@ -202,14 +238,43 @@ public class PNG : Image{
 		}
 		//compress imagedata if needed, then write it into the file
 		{	
-			auto compressor = new zlib.Compress(compLevel);
-			//ubyte[] secBuf = zlib.compress(cast(void[])imageData, compLevel);
-			// = compressor.compress(cast(void[])imageData);
-			//secBuf ~= compressor.flush();
-			writeBuffer.length = 0;
+			int ret, flush;
+    		//uint have;
+    		zlib.z_stream strm;
+			strm.zalloc = null;
+			strm.zfree = null;
+			strm.opaque = null;
+			ret = zlib.deflateInit(&strm, compLevel);
+			if (ret != zlib.Z_OK)
+				throw new Exception("Compressor initialization error");
+			ubyte[] output;
+			static if(writeblocksize < 2048)
+				output.length = 2048;
+			strm.next_in = imageData.ptr;
+			strm.avail_in = cast(uint)imageData.length;
+			do {
+				flush = strm.avail_in ? zlib.Z_NO_FLUSH : zlib.Z_FINISH;
+				strm.next_out = output.ptr;
+				strm.avail_out = cast(uint)output.length;
+				ret = zlib.deflate(&strm, flush);
+				if(ret == zlib.Z_STREAM_ERROR){
+					version(unittest) std.stdio.writeln(ret);
+					zlib.deflateEnd(&strm);
+					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
+				}
+				//version(unittest) std.stdio.writeln(strm.total_out);
+				//writeBuffer = output[0..$-strm.avail_out];
+				writeBuffer = cast(void[])[Chunk(cast(uint)writeBuffer.length, DATA_INIT).nativeToBigEndian] ~ output;
+				file.rawWrite(writeBuffer);
+				crc = crc32Of(writeBuffer[4..$]).dup.reverse;
+				file.rawWrite(crc);
+				//writeBuffer.length = 0;
+			} while (flush != zlib.Z_FINISH);
+			zlib.deflateEnd(&strm);
+			/*writeBuffer.length = 0;
 			size_t pos, cnt;
-			const size_t pitch = (header.width * header.bitDepth) / 8;
-			void[] secBuf;
+			const size_t pitch = (header.width * getBitdepth) / 8;
+			//void[] secBuf;
 			while(pos < imageData.length){
 				ubyte[] slice = pos < imageData.length ? imageData[pos..(pos + pitch)] : imageData[pos..$];
 				secBuf ~= compressor.compress(cast(void[])slice);
@@ -224,16 +289,16 @@ public class PNG : Image{
 				pos += pitch;
 				cnt++;
 			}
-			assert(cnt == header.height);
+			assert(cnt == header.height);*/
 			//writeBuffer.length = 0;
-			secBuf ~= compressor.flush();
+			/+secBuf ~= compressor.flush();
 			if(secBuf.length){
 				writeBuffer = cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
 				file.rawWrite(writeBuffer);
 				file.rawWrite(secBuf);
 				crc = crc32Of((cast(ubyte[])DATA_INIT) ~ secBuf).dup.reverse;
 				file.rawWrite(crc);
-			}
+			}+/
 			
 		}
 		//write IEND chunk
@@ -249,18 +314,36 @@ public class PNG : Image{
 		return header.height;
 	}
 	override bool isIndexed() @nogc @safe @property const pure{
-		return header.colorType == 3;
+		return header.colorType == ColorType.Indexed;
 	}
 	override ubyte getBitdepth() @nogc @safe @property const pure{
-		return header.bitDepth;
+		switch(header.colorType){
+			case ColorType.GreyscaleWithAlpha:
+				return cast(ubyte)(header.bitDepth * 2);
+			case ColorType.TrueColor:
+				return cast(ubyte)(header.bitDepth * 3);
+			case ColorType.TrueColorWithAlpha:
+				return cast(ubyte)(header.bitDepth * 4);
+			default:
+				return header.bitDepth;
+		}
 	}
 	override ubyte getPaletteBitdepth() @nogc @safe @property const pure{
 		return isIndexed ? 24 : 0;
 	}
-	override PixelFormat getPixelFormat() @nogc @safe @property const pure{
-		return header.bitDepth == 16 ? PixelFormat.RGBX5551 : PixelFormat.Undefined;
+	override uint getPixelFormat() @nogc @safe @property const pure{
+		switch(header.colorType){
+			case ColorType.GreyscaleWithAlpha:
+				return PixelFormat.CA88;
+			case ColorType.TrueColor:
+				return header.bitDepth == 8 ? PixelFormat.RGB888 : PixelFormat.RGBX5551;
+			case ColorType.TrueColorWithAlpha:
+				return PixelFormat.RGBA8888;
+			default:
+				return PixelFormat.Undefined;
+		}
 	}
-	override PixelFormat getPalettePixelFormat() @nogc @safe @property const pure{
+	override uint getPalettePixelFormat() @nogc @safe @property const pure{
 		return PixelFormat.RGB888;
 	}
 	public ref Header getHeader() @nogc @safe{

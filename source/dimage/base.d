@@ -74,8 +74,8 @@ abstract class Image{
 	abstract bool isIndexed() @nogc @safe @property const pure;
 	abstract ubyte getBitdepth() @nogc @safe @property const pure;
 	abstract ubyte getPaletteBitdepth() @nogc @safe @property const pure;
-	abstract PixelFormat getPixelFormat() @nogc @safe @property const pure;
-	abstract PixelFormat getPalettePixelFormat() @nogc @safe @property const pure;
+	abstract uint getPixelFormat() @nogc @safe @property const pure;
+	abstract uint getPalettePixelFormat() @nogc @safe @property const pure;
 	/**
 	 * Returns the pixel order for bitdepths less than 8. Almost excusively used for indexed bitmaps.
 	 * Returns null if ordering not needed.
@@ -321,8 +321,58 @@ struct Pixel32BitARGB {
         bytes[3] = 0xFF;
     }
 }
+
+struct Pixel32BitRGBA {
+    union{
+        ubyte[4] bytes;     /// RGBA
+        uint base;          /// Direct address
+    }
+	///Red
+    @nogc @property pure ref auto r() inout { return bytes[0]; }
+	///Green
+    @nogc @property pure ref auto g() inout { return bytes[1]; }
+	///Blue
+    @nogc @property pure ref auto b() inout { return bytes[2]; }
+	///Alpha
+    @nogc @property pure ref auto a() inout { return bytes[3]; }
+    @nogc this(ubyte[4] bytes){
+        this.bytes = bytes;
+    }
+    @nogc this(ubyte r, ubyte g, ubyte b, ubyte a){
+        bytes[0] = r;
+        bytes[1] = g;
+        bytes[2] = b;
+        bytes[3] = a;
+    }
+    @nogc this(PixelRGBA5551 p){
+        b = cast(ubyte)(p.b<<3 | p.b>>2);
+        g = cast(ubyte)(p.g<<3 | p.g>>2);
+        r = cast(ubyte)(p.r<<3 | p.r>>2);
+        a = p.a ? 0xFF : 0x00;
+    }
+	@nogc this(PixelRGB565 p){
+        b = cast(ubyte)(p.b<<3 | p.b>>2);
+        g = cast(ubyte)(p.g<<2 | p.g>>4);
+        r = cast(ubyte)(p.r<<3 | p.r>>2);
+        a = 0xFF;
+    }
+    @nogc this(Pixel24Bit p){
+        b = p.b;
+        g = p.g;
+        r = p.r;
+        a = 0xFF;
+    }
+}
+struct PixelCA88{
+	union{
+		ushort		base;
+		ubyte[2]	channels;
+	}
+	@nogc @property pure ref auto c() inout { return channels[0]; }
+    @nogc @property pure ref auto a() inout { return channels[1]; }
+}
 /**
- * 16 Bit colorspace with a single bit alpha.
+ * 16 Bit colorspace with a single bit alpha. This is should be used with RGBX5551 with channel a ignored
  */
 struct PixelRGBA5551{
 	union{
@@ -360,19 +410,25 @@ align(1) struct Pixel24Bit {
 }
 /**
  * Pixel formats where its needed.
- * Undefined should be used for all indexed bitmaps, except 16 bit big endian ones.
- * Lower 16 bits should be used for general identification, upper 16 bits are general identificators (endianness, etc)
+ * Undefined should be used for all indexed bitmaps, except 16 bit big endian ones, in which case a single BigEndian bit should be set high.
+ * Lower 16 bits should be used for general identification, upper 16 bits are general identificators (endianness, valid alpha channel, etc).
+ * 0x00 - 0x1F are reserved for 16 bit truecolor, 0x20 - 0x2F are reserved for 24 bit truecolor, 0x30 - 3F are reserved for integer grayscale,
+ * 0x40 - 0x5F are reserved for 32 bit truecolor 
  */
 enum PixelFormat : uint{
-	RGBA5551		=	0x1,
-	RGBX5551		=	0x2,
-	RGB565			=	0x3,
-	RGB888			=	0x20,
-	RGBA8888		=	0x40,
-	RGBX8888		=	0x41,
-	ARGB8888		=	0x42,
-	XRGB8888		=	0x43,
 	BigEndian		=	0x00_01_00_00,		///Always little endian if bit not set
+	ValidAlpha		=	0x00_02_00_00,		///If high, alpha is used
+	RGBX5551		=	0x1,
+	RGBA5551		=	RGBX5551 | ValidAlpha,
+	RGB565			=	0x2,
+	RGB888			=	0x20,
+	CX88			=	0x30,
+	CA88			=	CX88 | ValidAlpha,
+	RGBX8888		=	0x40,
+	RGBA8888		=	RGBX8888 | ValidAlpha,
+	XRGB8888		=	0x41,
+	ARGB8888		=	XRGB8888 | ValidAlpha,
+	
 	Undefined		=	0,
 }
 

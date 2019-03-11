@@ -759,7 +759,7 @@ public class TGA : Image, ImageMetadata{
 	override ubyte getPaletteBitdepth() @nogc @safe @property const pure{
 		return header.colorMapDepth;
 	}
-	override PixelFormat getPixelFormat() @nogc @safe @property const pure{
+	override uint getPixelFormat() @nogc @safe @property const pure{
 		if(!Header.ColorMapType.NoColorMapPresent){
 			return PixelFormat.Undefined;
 		}else{
@@ -775,7 +775,7 @@ public class TGA : Image, ImageMetadata{
 			}
 		}
 	}
-	override PixelFormat getPalettePixelFormat() @nogc @safe @property const pure{
+	override uint getPalettePixelFormat() @nogc @safe @property const pure{
 		if(Header.ColorMapType.NoColorMapPresent){
 			return PixelFormat.Undefined;
 		}else{
