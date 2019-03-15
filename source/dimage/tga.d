@@ -216,14 +216,14 @@ public class TGA : Image, ImageMetadata{
 		import std.stdio;
 		ubyte[] loadRLEImageData(const ref Header header){
 			size_t target = header.width * header.height;
-			const size_t bytedepth = (header.pixelDepth / 8);
+			const size_t bytedepth = header.pixelDepth >= 8 ? (header.pixelDepth / 8) : 1;
 			target >>= header.pixelDepth < 8 ? 1 : 0;
 			target >>= header.pixelDepth < 4 ? 1 : 0;
 			target >>= header.pixelDepth < 2 ? 1 : 0;
 			ubyte[] result, dataBuffer;
 			result.reserve(header.pixelDepth >= 8 ? target * bytedepth : target);
 			switch(header.pixelDepth){
-				case 16:
+				case 15, 16:
 					dataBuffer.length = 3;
 					break;
 				case 24:
@@ -234,51 +234,30 @@ public class TGA : Image, ImageMetadata{
 					break;
 				default:		//all indexed type having less than 8bits of depth use the same method of RLE as 8bit ones
 					dataBuffer.length = 2;
-					while(target){
-						file.rawRead(dataBuffer);
-						if(dataBuffer[0] & 0b1000_0000){//RLE block
-							dataBuffer[0] &= 0b0111_1111;
-							dataBuffer[0]++;
-							ubyte[] rleBlock;
-							rleBlock.length = dataBuffer[0];
-							memset(rleBlock.ptr, dataBuffer[1], dataBuffer[0]);
-							result ~= rleBlock;
-						}else{//literal block
-							dataBuffer[0] &= 0b0111_1111;
-							ubyte[] literalBlock;
-							literalBlock.length = dataBuffer[0]++;
-							file.rawRead(literalBlock);
-							result ~= dataBuffer[1] ~ literalBlock;
-							target--;
-						}
-						target -= dataBuffer[0];
-					}
-					assert(result.length == (header.width * header.height));
-					return result;
+					break;
 			}
-			while(target){
+			while(result.length < target * bytedepth){
 				file.rawRead(dataBuffer);
 				if(dataBuffer[0] & 0b1000_0000){//RLE block
 					dataBuffer[0] &= 0b0111_1111;
 					dataBuffer[0]++;
-					ubyte[] rleBlock;
-					rleBlock.reserve(dataBuffer[0] * bytedepth);
 					while(dataBuffer[0]){
-						rleBlock ~= dataBuffer[1..$];
+						result ~= dataBuffer[1..$];
 						dataBuffer[0]--;
-						target--;
+						//target--;
 					}
-					result ~= rleBlock;
+					//result ~= rleBlock;
 				}else{//literal block
 					dataBuffer[0] &= 0b0111_1111;
+					//dataBuffer[0]--;
 					ubyte[] literalBlock;
-					literalBlock.length = dataBuffer[0]++ * bytedepth;
-					file.rawRead(literalBlock);
+					literalBlock.length = (dataBuffer[0] * bytedepth);
+					if(literalBlock.length)file.rawRead(literalBlock);
 					result ~= dataBuffer[1..$] ~ literalBlock;
-					target -= dataBuffer[0];
 				}
 			}
-			assert(result.length == (header.width * header.height * bytedepth));
+			std.stdio.writeln(result.length, ";", (header.width * header.height * bytedepth));
+			assert(result.length == (header.width * header.height * bytedepth), "RLE overrun error!");
 			return result;
 		}
 		Header headerLoad;
@@ -1046,6 +1025,28 @@ unittest{
 		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
 		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
 		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/mapped_8_rle.tga");
+		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
+		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
+		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
+		compareImages(greyscaleUnc, greyscaleRLE);
+		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
+		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLEMapped;
+		VFile virtualFile;// = VFile(tempStream);
+		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
+		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		std.stdio.writeln("Save to virtual file was successful");
+		std.stdio.writeln(virtualFile.size);
+		virtualFile.seek(0);
+		greyscaleRLE = TGA.load!VFile(virtualFile);
+		std.stdio.writeln("Load from virtual file was successful");
+		compareImages(greyscaleUnc, greyscaleRLE);
+	}
+	{
+		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/concreteGUIE3.tga");
+		std.stdio.writeln("Loading ", greyscaleUncFile.name);
+		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
+		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
+		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/concreteGUIE3_rle.tga");
 		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
 		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
 		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");

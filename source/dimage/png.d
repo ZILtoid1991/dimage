@@ -213,7 +213,7 @@ public class PNG : Image{
 	 * Saves the file to the disk.
 	 * Currently interlaced mode is unsupported.
 	 */
-	public void save(F = std.stdio.File, size_t writeblocksize = 65536)(ref F file, int compLevel = 9){
+	public void save(F = std.stdio.File)(ref F file, int compLevel = zlib.Z_BEST_COMPRESSION){
 		ubyte[] crc;
 		//write PNG signature into file
 		file.rawWrite(PNG_SIGNATURE);
@@ -248,17 +248,30 @@ public class PNG : Image{
 			if (ret != zlib.Z_OK)
 				throw new Exception("Compressor initialization error");
 			ubyte[] output;
-			static if(writeblocksize < 2048)
-				output.length = 2048;
+			output.length = cast(uint)imageData.length;
 			strm.next_in = imageData.ptr;
 			strm.avail_in = cast(uint)imageData.length;
-			do {
-				flush = strm.avail_in ? zlib.Z_NO_FLUSH : zlib.Z_FINISH;
+			strm.next_out = output.ptr;
+			strm.avail_out = cast(uint)output.length;
+			do{
+				ret = zlib.deflate(&strm, zlib.Z_FINISH);
+				if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
+					//version(unittest) std.stdio.writeln(strm.total_out);
+					zlib.deflateEnd(&strm);
+					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
+				}
+			} while (ret != zlib.Z_STREAM_END);
+			writeBuffer = cast(void[])[Chunk(cast(uint)strm.total_out, DATA_INIT).nativeToBigEndian] ~ output[0..cast(size_t)strm.total_out];
+			file.rawWrite(writeBuffer);
+			crc = crc32Of(writeBuffer[4..$]).dup.reverse;
+			file.rawWrite(crc);
+			/+do {
+				flush = imageData.length - strm.total_in > 0 ? zlib.Z_NO_FLUSH : zlib.Z_FINISH;
 				strm.next_out = output.ptr;
 				strm.avail_out = cast(uint)output.length;
 				ret = zlib.deflate(&strm, flush);
 				if(ret == zlib.Z_STREAM_ERROR){
-					version(unittest) std.stdio.writeln(ret);
+					//version(unittest) std.stdio.writeln(strm.total_out);
 					zlib.deflateEnd(&strm);
 					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
 				}
@@ -269,27 +282,8 @@ public class PNG : Image{
 				crc = crc32Of(writeBuffer[4..$]).dup.reverse;
 				file.rawWrite(crc);
 				//writeBuffer.length = 0;
-			} while (flush != zlib.Z_FINISH);
+			} while (flush != zlib.Z_FINISH);+/
 			zlib.deflateEnd(&strm);
-			/*writeBuffer.length = 0;
-			size_t pos, cnt;
-			const size_t pitch = (header.width * getBitdepth) / 8;
-			//void[] secBuf;
-			while(pos < imageData.length){
-				ubyte[] slice = pos < imageData.length ? imageData[pos..(pos + pitch)] : imageData[pos..$];
-				secBuf ~= compressor.compress(cast(void[])slice);
-				if(secBuf.length > 2048){
-					writeBuffer = cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
-					file.rawWrite(writeBuffer);
-					file.rawWrite(secBuf);
-					crc = crc32Of((cast(ubyte[])DATA_INIT) ~ secBuf).dup.reverse;
-					file.rawWrite(crc);
-					secBuf.length = 0;
-				}
-				pos += pitch;
-				cnt++;
-			}
-			assert(cnt == header.height);*/
 			//writeBuffer.length = 0;
 			/+secBuf ~= compressor.flush();
 			if(secBuf.length){
@@ -365,18 +359,18 @@ unittest{
 		}
 	}
 	{
-		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE8.png");
+		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE24.png");
 		std.stdio.writeln("Loading ", indexedPNGFile.name);
 		PNG a = PNG.load(indexedPNGFile);
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
-		std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
-		a.save(output);
-		VFile virtualIndexedPNGFile;
-		a.save(virtualIndexedPNGFile);
-		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
-		PNG b = PNG.load(virtualIndexedPNGFile);
-		std.stdio.writeln("Image restored from virtual file");
-		compareImages(a, b);
-		std.stdio.writeln("The two images' output match");
+		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
+		//a.save(output);
+		//VFile virtualIndexedPNGFile;
+		//a.save(virtualIndexedPNGFile);
+		//std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
+		//PNG b = PNG.load(virtualIndexedPNGFile);
+		//std.stdio.writeln("Image restored from virtual file");
+		//compareImages(a, b);
+		//std.stdio.writeln("The two images' output match");
 	}
 }
