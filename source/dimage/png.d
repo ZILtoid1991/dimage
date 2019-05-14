@@ -150,6 +150,7 @@ public class PNG : Image{
 			readBuffer.length = curChunk.dataLength;
 			if(curChunk.dataLength)
 				file.rawRead(readBuffer);
+			//std.stdio.writeln("pos:", file.tell);
 			switch(curChunk.identifier){
 				case HEADER_INIT:
 					result.header = *(cast(Header*)(cast(void*)readBuffer.ptr));
@@ -169,7 +170,7 @@ public class PNG : Image{
 					strm.next_in = readBuffer.ptr;
 					strm.avail_in = cast(uint)readBuffer.length;
 					ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
-
+					
 					if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
 						version(unittest) std.stdio.writeln(ret);
 						zlib.inflateEnd(&strm);
@@ -206,14 +207,14 @@ public class PNG : Image{
 			std.stdio.writeln(result.imageData.length);
 		}
 		//assert(result.imageData.length == (result.header.width * result.header.height * result.header.bitDepth)/8);
-		result.imageData.length = (result.header.width * result.header.height * result.header.bitDepth)/8;
+		//result.imageData.length = (result.header.width * result.header.height * result.header.bitDepth)/8;
 		return result;
 	}
 	/**
 	 * Saves the file to the disk.
 	 * Currently interlaced mode is unsupported.
 	 */
-	public void save(F = std.stdio.File)(ref F file, int compLevel = zlib.Z_BEST_COMPRESSION){
+	public void save(F = std.stdio.File)(ref F file, int compLevel = 6){
 		ubyte[] crc;
 		//write PNG signature into file
 		file.rawWrite(PNG_SIGNATURE);
@@ -228,7 +229,7 @@ public class PNG : Image{
 		crc = crc32Of((cast(ubyte[])HEADER_INIT) ~ writeBuffer).dup.reverse;
 		file.rawWrite(crc);
 		//write palette into file if exists
-		if(paletteData.length){
+		if (paletteData.length) {
 			writeBuffer.length = 0;
 			writeBuffer ~= cast(void[])[Chunk(cast(uint)paletteData.length, PALETTE_INIT).nativeToBigEndian];
 			file.rawWrite(writeBuffer);
@@ -238,62 +239,62 @@ public class PNG : Image{
 		}
 		//compress imagedata if needed, then write it into the file
 		{	
-			int ret, flush;
+			int ret;
     		//uint have;
     		zlib.z_stream strm;
-			strm.zalloc = null;
-			strm.zfree = null;
-			strm.opaque = null;
 			ret = zlib.deflateInit(&strm, compLevel);
 			if (ret != zlib.Z_OK)
 				throw new Exception("Compressor initialization error");
 			ubyte[] output;
-			output.length = cast(uint)imageData.length;
+			output.length = 32 * 1024;//cast(uint)imageData.length;
 			strm.next_in = imageData.ptr;
 			strm.avail_in = cast(uint)imageData.length;
 			strm.next_out = output.ptr;
 			strm.avail_out = cast(uint)output.length;
-			do{
+			/+do {
+				std.stdio.writeln(ret, ";", strm.avail_in, ";", strm.total_in, ";", strm.total_out);
+				if (!strm.avail_out) {
+					//writeBuffer.length = 0;
+					writeBuffer = cast(void[])[Chunk(cast(uint)output.length, DATA_INIT).nativeToBigEndian];
+					file.rawWrite(writeBuffer);
+					file.rawWrite(output);
+					crc = crc32Of((cast(ubyte[])DATA_INIT) ~ output).dup.reverse;
+					file.rawWrite(crc);
+					strm.next_out = output.ptr;
+					strm.avail_out = cast(uint)output.length;
+				}
+				ret = zlib.deflate(&strm, zlib.Z_NO_FLUSH);
+				if(ret < 0){
+					zlib.deflateEnd(&strm);
+					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
+				}
+			} while (strm.avail_in);+/
+			do {
+				//std.stdio.writeln(ret, ";", strm.avail_in, ";", strm.total_in, ";", strm.total_out);
+				if (!strm.avail_out) {
+					writeBuffer = cast(void[])[Chunk(cast(uint)output.length, DATA_INIT).nativeToBigEndian];
+					file.rawWrite(writeBuffer);
+					file.rawWrite(output);
+					crc = crc32Of((cast(ubyte[])DATA_INIT) ~ output).dup.reverse;
+					file.rawWrite(crc);
+					strm.next_out = output.ptr;
+					strm.avail_out = cast(uint)output.length;
+				}
 				ret = zlib.deflate(&strm, zlib.Z_FINISH);
-				if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
-					//version(unittest) std.stdio.writeln(strm.total_out);
+				//std.stdio.writeln(ret, ";", strm.avail_out);
+				if(ret < 0){
 					zlib.deflateEnd(&strm);
 					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
 				}
 			} while (ret != zlib.Z_STREAM_END);
-			writeBuffer = cast(void[])[Chunk(cast(uint)strm.total_out, DATA_INIT).nativeToBigEndian] ~ output[0..cast(size_t)strm.total_out];
-			file.rawWrite(writeBuffer);
-			crc = crc32Of(writeBuffer[4..$]).dup.reverse;
-			file.rawWrite(crc);
-			/+do {
-				flush = imageData.length - strm.total_in > 0 ? zlib.Z_NO_FLUSH : zlib.Z_FINISH;
-				strm.next_out = output.ptr;
-				strm.avail_out = cast(uint)output.length;
-				ret = zlib.deflate(&strm, flush);
-				if(ret == zlib.Z_STREAM_ERROR){
-					//version(unittest) std.stdio.writeln(strm.total_out);
-					zlib.deflateEnd(&strm);
-					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
-				}
-				//version(unittest) std.stdio.writeln(strm.total_out);
-				//writeBuffer = output[0..$-strm.avail_out];
-				writeBuffer = cast(void[])[Chunk(cast(uint)writeBuffer.length, DATA_INIT).nativeToBigEndian] ~ output;
+			if (strm.avail_out != output.length) {
+				writeBuffer = cast(void[])[Chunk(cast(uint)(output.length - strm.avail_out), DATA_INIT).nativeToBigEndian];
 				file.rawWrite(writeBuffer);
-				crc = crc32Of(writeBuffer[4..$]).dup.reverse;
+				file.rawWrite(output[0..$-strm.avail_out]);
+				crc = crc32Of((cast(ubyte[])DATA_INIT) ~ output[0..$-strm.avail_out]).dup.reverse;
 				file.rawWrite(crc);
-				//writeBuffer.length = 0;
-			} while (flush != zlib.Z_FINISH);+/
+			}
 			zlib.deflateEnd(&strm);
-			//writeBuffer.length = 0;
-			/+secBuf ~= compressor.flush();
-			if(secBuf.length){
-				writeBuffer = cast(void[])[Chunk(cast(uint)secBuf.length, DATA_INIT).nativeToBigEndian];
-				file.rawWrite(writeBuffer);
-				file.rawWrite(secBuf);
-				crc = crc32Of((cast(ubyte[])DATA_INIT) ~ secBuf).dup.reverse;
-				file.rawWrite(crc);
-			}+/
-			
 		}
 		//write IEND chunk
 		//writeBuffer.length = 0;
@@ -365,12 +366,29 @@ unittest{
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
 		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
 		//a.save(output);
-		//VFile virtualIndexedPNGFile;
-		//a.save(virtualIndexedPNGFile);
-		//std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
-		//PNG b = PNG.load(virtualIndexedPNGFile);
-		//std.stdio.writeln("Image restored from virtual file");
-		//compareImages(a, b);
-		//std.stdio.writeln("The two images' output match");
+		VFile virtualIndexedPNGFile;
+		a.save(virtualIndexedPNGFile);
+		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
+		virtualIndexedPNGFile.seek(0);
+		PNG b = PNG.load(virtualIndexedPNGFile);
+		std.stdio.writeln("Image restored from virtual file");
+		compareImages(a, b);
+		std.stdio.writeln("The two images' output match");
+	}
+	{
+		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE8.png");
+		std.stdio.writeln("Loading ", indexedPNGFile.name);
+		PNG a = PNG.load(indexedPNGFile);
+		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
+		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
+		//a.save(output);
+		VFile virtualIndexedPNGFile;
+		a.save(virtualIndexedPNGFile);
+		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
+		virtualIndexedPNGFile.seek(0);
+		PNG b = PNG.load(virtualIndexedPNGFile);
+		std.stdio.writeln("Image restored from virtual file");
+		compareImages(a, b);
+		std.stdio.writeln("The two images' output match");
 	}
 }
