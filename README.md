@@ -17,15 +17,18 @@ Image file handling library for D
 
 ## Portable Network Graphics (png)
 
-* Compression and decompression through phobos' std.zlib.
-* Error with compression due to improper flushing in std.zlib.
+* Compression and decompression through phobos' etc.c.zlib.
+* Output mostly works, output is disliked by most applications due to bad chunks, the image might have some errors.
 * No interlace support yet.
 * Only basic functions are supported
 
 # Planned features
 
+* Better memory safety.
+
 ## Planned formats
 
 * BMP
+* TIFF
 * GIF
 * JPEG
