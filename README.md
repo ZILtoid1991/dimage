@@ -29,6 +29,6 @@ Image file handling library for D
 ## Planned formats
 
 * BMP
-* TIFF
-* GIF
-* JPEG
+* TIFF (needs LZW)
+* GIF (needs LZW)
+* JPEG (needs codec)
