@@ -9,32 +9,34 @@ module dimage.base;
 
 import std.bitmanip;
 
+import dimage.util;
+
 /**
  * Interface for image orientation for files that support them.
  */
-public interface ImageOrientation{
+/+public interface ImageOrientation{
 	public @property bool rightHandOrientation() inout;
 	public @property bool topSideOrientation() inout;
 	public void flipVertical();
 	public void flipHorizontal();
-}
+}+/
 /**
  * Interface for accessing metadata within images.
  * Any metadata that's not supported should return null.
  */
 public interface ImageMetadata{
-	public string getID();
-	public string getAuthor();
-	public string getComment();
-	public string getJobName();
-	public string getSoftwareInfo();
-	public string getSoftwareVersion();
-	public void setID(string val);
-	public void setAuthor(string val);
-	public void setComment(string val);
-	public void setJobName(string val);
-	public void setSoftwareInfo(string val);
-	public void setSoftwareVersion(string val);
+	public string getID() @safe;
+	public string getAuthor() @safe;
+	public string getComment() @safe;
+	public string getJobName() @safe;
+	public string getSoftwareInfo() @safe;
+	public string getSoftwareVersion() @safe;
+	public void setID(string val) @safe;
+	public void setAuthor(string val) @safe;
+	public void setComment(string val) @safe;
+	public void setJobName(string val) @safe;
+	public void setSoftwareInfo(string val) @safe;
+	public void setSoftwareVersion(string val) @safe;
 }
 /**
  * All image classes should be derived from this base.
@@ -69,8 +71,8 @@ abstract class Image{
 	protected ubyte mod;	///used for fast access of indexes
 	protected ubyte shift;	///used for fast access of indexes
 	
-	abstract int width() @nogc @safe @property const pure;
-	abstract int height() @nogc @safe @property const pure;
+	abstract uint width() @nogc @safe @property const pure;
+	abstract uint height() @nogc @safe @property const pure;
 	abstract bool isIndexed() @nogc @safe @property const pure;
 	abstract ubyte getBitdepth() @nogc @safe @property const pure;
 	abstract ubyte getPaletteBitdepth() @nogc @safe @property const pure;
@@ -92,26 +94,26 @@ abstract class Image{
 	/**
 	 * Reads a single 32bit pixel. If the image is indexed, a color lookup will be done.
 	 */
-	public Pixel32Bit readPixel(int x, int y){
+	public Pixel32Bit readPixel(uint x, uint y) @safe{
 		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds");
 		}
 		if(isIndexed){
-			ushort index = readPixelIndex!ushort(x, y);
+			const ushort index = readPixelIndex!ushort(x, y);
 			return readPalette(index);
 		}else{
 			final switch(getBitdepth){
 				case 8:
-					ubyte data = imageData[x + y * width];
+					const ubyte data = imageData[x + y * width];
 					return Pixel32Bit(data, data, data, 0xFF);
 				case 16:
-					PixelRGBA5551 data = (cast(PixelRGBA5551[])(cast(void[])imageData))[x + y * width];
+					PixelRGBA5551 data = reinterpretCast!PixelRGBA5551(imageData)[x + y * width];
 					return Pixel32Bit(data);
 				case 24:
-					Pixel24Bit data = (cast(Pixel24Bit[])(cast(void[])imageData))[x + y * width];
+					Pixel24Bit data = reinterpretCast!Pixel24Bit(imageData)[x + y * width];
 					return Pixel32Bit(data);
 				case 32:
-					Pixel32Bit data = (cast(Pixel32Bit[])(cast(void[])imageData))[x + y * width];
+					Pixel32Bit data = reinterpretCast!Pixel32Bit(imageData)[x + y * width];
 					return data;
 			}
 		}
@@ -120,25 +122,25 @@ abstract class Image{
 	 * Reads the given type of pixel from the image.
 	 * Throws an ImageFormatException, if the pixel does not match the requested format.
 	 */
-	public T readPixel(T)(int x, int y){
+	public T readPixel(T)(uint x, uint y) @safe {
 		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds");
 		}
 		if(isIndexed){
-			ushort index = readPixelIndex!ushort(x, y);
+			const ushort index = readPixelIndex!ushort(x, y);
 			return readPalette!(T)(index);
 		}else{
 			if(T.sizeof * 8 != getBitdepth){
 				throw new ImageFormatException("Requested format is invalid");
 			}
-			T data = (cast(T[])(cast(void[])imageData))[x + y * width];
+			T data = reinterpretCast!T(imageData)[x + y * width];
 			return data;
 		}
 	}
 	/**
 	 * Reads an index, if the image isn't indexed throws an ImageFormatException.
 	 */
-	public T readPixelIndex(T = ubyte)(int x, int y)
+	public T readPixelIndex(T = ubyte)(uint x, uint y) @safe
 			if(T.stringof == ushort.stringof || T.stringof == ubyte.stringof){
 		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds!");
@@ -154,20 +156,22 @@ abstract class Image{
 			}else{
 				const ubyte[] pixelorder = getPixelOrder;
 				const size_t offset = (x + y * width);
-				ubyte data = imageData[offset >> shift], currentPO = pixelorder[offset & mod];
+				ubyte data = imageData[offset >> shift];
+				const ubyte currentPO = pixelorder[offset & mod];
 				data &= currentPO;
 				data >>= getPixelOrderBitshift()[offset & mod];
 				return data;
 			}
 		}else static if(T.stringof == ushort.stringof){
 			if(getBitdepth == 16){
-				return (cast(ushort[])(cast(void[])imageData))[x + y * width];
+				return reinterpretCast!T(imageData)[x + y * width];
 			}else if(getBitdepth == 8){
 				return imageData[x + y * width];
 			}else{
 				const ubyte[] pixelorder = getPixelOrder, bitshift = getPixelOrderBitshift;
 				const size_t offset = (x + y * width);
-				ubyte data = imageData[offset >> shift], currentPO = pixelorder[offset & mod];
+				byte data = imageData[offset >> shift];
+				const ubyte currentPO = pixelorder[offset & mod];
 				data &= currentPO;
 				data >>= bitshift[offset & mod];
 				return data;
@@ -177,7 +181,7 @@ abstract class Image{
 	/**
 	 * Looks up the index on the palette, then returns the color value as a 32 bit value.
 	 */
-	public Pixel32Bit readPalette(ushort index){
+	public Pixel32Bit readPalette(ushort index) @safe{
 		if(!isIndexed)
 			throw new ImageFormatException("Image isn't indexed!");
 		final switch(getPaletteBitdepth){
@@ -189,31 +193,31 @@ abstract class Image{
 			case 16:
 				if(index<<1 > paletteData.length)
 					throw new PaletteBoundsException("Palette index is too high!");
-				PixelRGBA5551 data = (cast(PixelRGBA5551[])(cast(void[])paletteData))[index];
+				PixelRGBA5551 data = reinterpretCast!PixelRGBA5551(paletteData)[index];
 				return Pixel32Bit(data);
 			case 24:
 				if(index * 3 > paletteData.length)
 					throw new PaletteBoundsException("Palette index is too high!");
-				Pixel24Bit data = (cast(Pixel24Bit[])(cast(void[])paletteData))[index];
+				Pixel24Bit data = reinterpretCast!Pixel24Bit(paletteData)[index];
 				return Pixel32Bit(data);
 			case 32:
 				if(index<<2 > paletteData.length)
 					throw new PaletteBoundsException("Palette index is too high!");
-				Pixel32Bit data = (cast(Pixel32Bit[])(cast(void[])paletteData))[index];
+				Pixel32Bit data = reinterpretCast!Pixel32Bit(paletteData)[index];
 				return data;
 		}
 	}
 	/**
 	 * Looks up the index on the palette, then returns the color value in the requested format.
 	 */
-	public T readPalette(T)(ushort index){
+	public T readPalette(T)(ushort index) @safe{
 		if(!isIndexed)
 			throw new ImageFormatException("Image isn't indexed!");
 		if(T.sizeof * 8 != getPaletteBitdepth)
 			throw new ImageFormatException("Palette format mismatch!");
 		if(paletteData.length / T.sizeof < index)
 			throw new PaletteBoundsException("Palette index is too high!");
-		T data = (cast(T[])(cast(void[])paletteData))[index];
+		T data = reinterpretCast!T(paletteData)[index];
 		return data;
 	}
 	/**
@@ -222,9 +226,7 @@ abstract class Image{
 	 * ushort: all 16bit indexed formats.
 	 * Any other pixel structs are used for direct color.
 	 */
-	public T writePixel(T)(int x, int y, T pixel) if(T.stringof == ubyte.stringof || T.stringof == ushort.stringof
-			|| T.stringof == PixelRGBA5551.stringof || T.stringof == PixelRGB565.stringof || 
-			T.stringof == Pixel24Bit.stringof || T.stringof == Pixel32Bit.stringof){
+	public T writePixel(T)(uint x, uint y, T pixel) @safe {
 		if(x >= width || y >= height)
 			throw new ImageBoundsException("Image is being written out of bounds!");
 		
@@ -238,7 +240,7 @@ abstract class Image{
 			static if(T.stringof == ushort.stringof){
 				if(getBitdepth <= 8)
 					throw new ImageFormatException("Image cannot be written as 16 bit!");
-				return (cast(ushort[])(cast(void[])imageData))[x + (y * width)] = pixel;
+				return reinterpretCast!T(imageData)[x + (y * width)] = pixel;
 			}else{
 				switch(getBitdepth){
 					case 8 :
@@ -255,7 +257,7 @@ abstract class Image{
 				}
 			}
 		}else{
-			T[] pixels = cast(T[])(cast(void[])imageData);
+			T[] pixels = reinterpretCast!T(imageData);
 			if(T.sizeof != getBitdepth / 8)
 				throw new ImageFormatException("Image format mismatch exception");
 			return pixels[x + (y * width)] = pixel;
@@ -267,116 +269,217 @@ abstract class Image{
 	/**
 	 * Returns the raw image data.
 	 */
-	public ubyte[] getImageData() @nogc nothrow{
+	public ubyte[] getImageData() @nogc @safe nothrow{
 		return imageData;
 	}
 	/**
 	 * Returns the raw palette data.
 	 */
-	public ubyte[] getPaletteData() @nogc nothrow{
+	public ubyte[] getPaletteData() @nogc @safe nothrow{
 		return paletteData;
+	}
+	/**
+	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
+	 */
+	public void flipVertical() @safe{
+		import std.algorithm.mutation : swapRanges;
+		//header.topOrigin = !header.topOrigin;
+		const size_t workLength = (width * getBitdepth)>>3;
+		for(int y ; y < height>>1 ; y++){
+			const int rev = height - y;
+			swapRanges(imageData[workLength * y..workLength * (y + 1)], imageData[workLength * (rev - 1)..workLength * rev]);
+		}
+	}
+	/**
+	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
+	 */
+	public void flipHorizontal() @safe{
+		if(isIndexed){
+			if(getBitdepth == 16){
+				for(int y ; y < height ; y++){
+					for(int x ; x < width>>1 ; x++){
+						const int x0 = width - x;
+						const ushort temp = readPixelIndex!(ushort)(x, y);
+						writePixel!(ushort)(x, y, readPixelIndex!(ushort)(x0, y));
+						writePixel!(ushort)(x0, y, temp);
+					}
+				}
+			}else{
+				for(int y ; y < height ; y++){
+					for(int x ; x < width>>1 ; x++){
+						const int x0 = width - x;
+						const ubyte temp = readPixelIndex!(ubyte)(x, y);
+						writePixel!(ubyte)(x, y, readPixelIndex!(ubyte)(x0, y));
+						writePixel!(ubyte)(x0, y, temp);
+					}
+				}
+			}
+		}else{
+			final switch(getBitdepth){
+				case 8:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const ubyte temp = readPixel!(ubyte)(x, y);
+							writePixel!(ubyte)(x, y, readPixel!(ubyte)(x0, y));
+							writePixel!(ubyte)(x0, y, temp);
+						}
+					}
+					break;
+				case 16:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const ushort temp = readPixel!(ushort)(x, y);
+							writePixel!(ushort)(x, y, readPixel!(ushort)(x0, y));
+							writePixel!(ushort)(x0, y, temp);
+						}
+					}
+					break;
+				case 24:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const Pixel24Bit temp = readPixel!(Pixel24Bit)(x, y);
+							writePixel!(Pixel24Bit)(x, y, readPixel!(Pixel24Bit)(x0, y));
+							writePixel!(Pixel24Bit)(x0, y, temp);
+						}
+					}
+					break;
+				case 32:
+					for(int y ; y < height ; y++){
+						for(int x ; x < width>>1 ; x++){
+							const int x0 = width - x;
+							const Pixel32Bit temp = readPixel!(Pixel32Bit)(x, y);
+							writePixel!(Pixel32Bit)(x, y, readPixel!(Pixel32Bit)(x0, y));
+							writePixel!(Pixel32Bit)(x0, y, temp);
+						}
+					}
+					break;
+			}
+		}
 	}
 }
 
 alias Pixel32Bit = Pixel32BitARGB;
 
+/**
+ * Standard 32 bit pixel representation.
+ */
 struct Pixel32BitARGB {
     union{
         ubyte[4] bytes;     /// BGRA
         uint base;          /// Direct address
     }
 	///Red
-    @nogc @property pure ref auto r() inout { return bytes[2]; }
+    @safe @nogc @property pure ref auto r() inout { return bytes[2]; }
 	///Green
-    @nogc @property pure ref auto g() inout { return bytes[1]; }
+    @safe @nogc @property pure ref auto g() inout { return bytes[1]; }
 	///Blue
-    @nogc @property pure ref auto b() inout { return bytes[0]; }
+    @safe @nogc @property pure ref auto b() inout { return bytes[0]; }
 	///Alpha
-    @nogc @property pure ref auto a() inout { return bytes[3]; }
-    @nogc this(ubyte[4] bytes){
+    @safe @nogc @property pure ref auto a() inout { return bytes[3]; }
+	///Creates a standard pixel representation out from a 4 element array
+    @nogc this(ubyte[4] bytes) @safe{
         this.bytes = bytes;
     }
-    @nogc this(ubyte r, ubyte g, ubyte b, ubyte a){
+	///Creates a standard pixel representation out from 4 separate values
+    @nogc this(ubyte r, ubyte g, ubyte b, ubyte a) @safe{
         bytes[0] = b;
         bytes[1] = g;
         bytes[2] = r;
         bytes[3] = a;
     }
-    @nogc this(PixelRGBA5551 p){
+	///Creates a standard pixel representation out of an RGBA5551 value
+    @nogc this(PixelRGBA5551 p) @safe{
         bytes[0] = cast(ubyte)(p.b<<3 | p.b>>2);
         bytes[1] = cast(ubyte)(p.g<<3 | p.g>>2);
         bytes[2] = cast(ubyte)(p.r<<3 | p.r>>2);
         bytes[3] = p.a ? 0xFF : 0x00;
     }
-	@nogc this(PixelRGB565 p){
+	///Creates a standard pixel representation out of an RGB565 value
+	@nogc this(PixelRGB565 p) @safe{
         bytes[0] = cast(ubyte)(p.b<<3 | p.b>>2);
         bytes[1] = cast(ubyte)(p.g<<2 | p.g>>4);
         bytes[2] = cast(ubyte)(p.r<<3 | p.r>>2);
         bytes[3] = 0xFF;
     }
-    @nogc this(Pixel24Bit p){
+	///Creates a standard pixel representation out of an RGB888 value
+    @nogc this(Pixel24Bit p) @safe{
         bytes[0] = p.b;
         bytes[1] = p.g;
         bytes[2] = p.r;
         bytes[3] = 0xFF;
     }
 }
-
+/**
+ * Standard 32 bit pixel representation.
+ */
 struct Pixel32BitRGBA {
     union{
         ubyte[4] bytes;     /// RGBA
         uint base;          /// Direct address
     }
 	///Red
-    @nogc @property pure ref auto r() inout { return bytes[0]; }
+    @safe @nogc @property pure ref auto r() inout { return bytes[0]; }
 	///Green
-    @nogc @property pure ref auto g() inout { return bytes[1]; }
+    @safe @nogc @property pure ref auto g() inout { return bytes[1]; }
 	///Blue
-    @nogc @property pure ref auto b() inout { return bytes[2]; }
+    @safe @nogc @property pure ref auto b() inout { return bytes[2]; }
 	///Alpha
-    @nogc @property pure ref auto a() inout { return bytes[3]; }
-    @nogc this(ubyte[4] bytes){
+    @safe @nogc @property pure ref auto a() inout { return bytes[3]; }
+	///Creates a standard pixel representation out from a 4 element array
+    @nogc this(ubyte[4] bytes) @safe{
         this.bytes = bytes;
     }
-    @nogc this(ubyte r, ubyte g, ubyte b, ubyte a){
+	///Creates a standard pixel representation out from 4 separate values
+    @nogc this(ubyte r, ubyte g, ubyte b, ubyte a) @safe{
         bytes[0] = r;
         bytes[1] = g;
         bytes[2] = b;
         bytes[3] = a;
     }
-    @nogc this(PixelRGBA5551 p){
+	///Creates a standard pixel representation out of an RGBA5551 value
+    @nogc this(PixelRGBA5551 p) @safe{
         b = cast(ubyte)(p.b<<3 | p.b>>2);
         g = cast(ubyte)(p.g<<3 | p.g>>2);
         r = cast(ubyte)(p.r<<3 | p.r>>2);
         a = p.a ? 0xFF : 0x00;
     }
-	@nogc this(PixelRGB565 p){
+	///Creates a standard pixel representation out of an RGB565 value
+	@nogc this(PixelRGB565 p) @safe{
         b = cast(ubyte)(p.b<<3 | p.b>>2);
         g = cast(ubyte)(p.g<<2 | p.g>>4);
         r = cast(ubyte)(p.r<<3 | p.r>>2);
         a = 0xFF;
     }
-    @nogc this(Pixel24Bit p){
+	///Creates a standard pixel representation out of an RGB888 value
+    @nogc this(Pixel24Bit p) @safe{
         b = p.b;
         g = p.g;
         r = p.r;
         a = 0xFF;
     }
 }
-struct PixelCA88{
+/**
+ * For monochrome images with a single channel
+ */
+struct PixelYA88{
 	union{
-		ushort		base;
-		ubyte[2]	channels;
+		ushort		base;		/// direct access
+		ubyte[2]	channels;	/// individual access
 	}
-	@nogc @property pure ref auto c() inout { return channels[0]; }
-    @nogc @property pure ref auto a() inout { return channels[1]; }
+	/// luminance
+	@safe @nogc @property pure ref auto y() inout { return channels[0]; }
+	/// alpha
+    @safe @nogc @property pure ref auto a() inout { return channels[1]; }
 }
 /**
  * 16 Bit colorspace with a single bit alpha. This is should be used with RGBX5551 with channel a ignored
  */
 struct PixelRGBA5551{
 	union{
-		ushort base;
+		ushort base;			/// direct access
 		mixin(bitfields!(
 			ubyte, "b", 5,
 			ubyte, "g", 5,
@@ -390,7 +493,7 @@ struct PixelRGBA5551{
  */
 struct PixelRGB565{
 	union{
-		ushort base;
+		ushort base;			/// direct access
 		mixin(bitfields!(
 			ubyte, "b", 5,
 			ubyte, "g", 6,
@@ -402,17 +505,21 @@ struct PixelRGB565{
  * 24 Bit colorspace
  */
 align(1) struct Pixel24Bit {
-    ubyte[3] bytes;
-    @nogc @property pure ref auto r() inout { return bytes[2]; }
-    @nogc @property pure ref auto g() inout { return bytes[1]; }
-    @nogc @property pure ref auto b() inout { return bytes[0]; }
-	@nogc @property pure uint base(){ return 0xff_00_00_00 | bytes[2] | bytes[1] | bytes[0]; }
+    ubyte[3] bytes;				///individual access
+	///red
+    @safe @nogc @property pure ref auto r() inout { return bytes[2]; }
+	///green
+    @safe @nogc @property pure ref auto g() inout { return bytes[1]; }
+	///blue
+    @safe @nogc @property pure ref auto b() inout { return bytes[0]; }
+	///direct access read
+	@safe @nogc @property pure uint base(){ return 0xff_00_00_00 | bytes[2] | bytes[1] | bytes[0]; }
 }
 /**
  * Pixel formats where its needed.
  * Undefined should be used for all indexed bitmaps, except 16 bit big endian ones, in which case a single BigEndian bit should be set high.
  * Lower 16 bits should be used for general identification, upper 16 bits are general identificators (endianness, valid alpha channel, etc).
- * 0x00 - 0x1F are reserved for 16 bit truecolor, 0x20 - 0x2F are reserved for 24 bit truecolor, 0x30 - 3F are reserved for integer grayscale,
+ * 0x01 - 0x1F are reserved for 16 bit truecolor, 0x20 - 0x2F are reserved for 24 bit truecolor, 0x30 - 3F are reserved for integer grayscale,
  * 0x40 - 0x5F are reserved for 32 bit truecolor 
  */
 enum PixelFormat : uint{
@@ -422,8 +529,8 @@ enum PixelFormat : uint{
 	RGBA5551		=	RGBX5551 | ValidAlpha,
 	RGB565			=	0x2,
 	RGB888			=	0x20,
-	CX88			=	0x30,
-	CA88			=	CX88 | ValidAlpha,
+	YX88			=	0x30,
+	YA88			=	YX88 | ValidAlpha,
 	RGBX8888		=	0x40,
 	RGBA8888		=	RGBX8888 | ValidAlpha,
 	XRGB8888		=	0x41,

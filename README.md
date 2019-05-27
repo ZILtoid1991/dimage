@@ -18,9 +18,9 @@ Image file handling library for D
 ## Portable Network Graphics (png)
 
 * Compression and decompression through phobos' etc.c.zlib.
-* Output mostly works, output is disliked by most applications due to bad chunks, the image might have some errors.
+* Output mostly works. Certain ancillary chunks generate bad checksums on writing, which might not be liked by certain readers.
 * No interlace support yet.
-* Only basic functions are supported
+* Basic processing is fully supported, unsupported chunks are stored as extra embedded data.
 
 # Planned features
 
@@ -29,6 +29,6 @@ Image file handling library for D
 ## Planned formats
 
 * BMP
-* TIFF
-* GIF
-* JPEG
+* TIFF (requires LZW)
+* GIF (requires LZW)
+* JPEG (requires codec)

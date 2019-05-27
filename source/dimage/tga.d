@@ -11,8 +11,10 @@ import std.bitmanip;
 static import std.stdio;
 
 public import dimage.base;
+import dimage.util;
 
-import core.stdc.string;
+//import core.stdc.string;
+import std.conv : to;
 
 /**
  * Implements the Truevision Graphics bitmap file format (*.tga) with some extra capabilities at the cost
@@ -212,7 +214,7 @@ public class TGA : Image, ImageMetadata{
 	 * Loads a Truevision TARGA file and creates a TGA object.
 	 * FILE can be either std.stdio's file, my own implementation of a virtual file (see ziltoid1991/vfile), or any compatible solution.
 	 */
-	public static TGA load(FILE = std.stdio.File, bool loadDevArea = false, bool loadExtArea = false)(ref FILE file){
+	public static TGA load(FILE = std.stdio.File, bool loadDevArea = true, bool loadExtArea = true)(ref FILE file){
 		import std.stdio;
 		ubyte[] loadRLEImageData(const ref Header header){
 			size_t target = header.width * header.height;
@@ -261,9 +263,10 @@ public class TGA : Image, ImageMetadata{
 			return result;
 		}
 		Header headerLoad;
-		ubyte[Header.sizeof] headerBuffer;
-		file.rawRead(headerBuffer);
-		headerLoad = *(cast(Header*)(cast(void*)headerBuffer.ptr));
+		ubyte[] readBuffer;
+		readBuffer.length = Header.sizeof;
+		file.rawRead(readBuffer);
+		headerLoad = reinterpretCast!Header(readBuffer)[0];
 		char[] imageIDLoad;
 		imageIDLoad.length = headerLoad.idLength;
 		if(imageIDLoad.length) file.rawRead(imageIDLoad);
@@ -281,9 +284,11 @@ public class TGA : Image, ImageMetadata{
 		}
 		static if(loadExtArea || loadDevArea){
 			Footer footerLoad;
+			readBuffer.length = Footer.sizeof;
 			file.seek(Footer.sizeof * -1, SEEK_END);
-			footerLoad = file.rawRead([footerLoad]);
-			TGA result = new TGA(headerLoad, footerLoad, image, palette, imageID);
+			file.rawRead(readBuffer);
+			footerLoad = reinterpretCast!Footer(readBuffer)[0];
+			TGA result = new TGA(headerLoad, footerLoad, image, palette, imageIDLoad);
 			if(footerLoad.isValid){
 				static if(loadDevArea){
 					if(footerLoad.developerAreaOffset){
@@ -331,12 +336,15 @@ public class TGA : Image, ImageMetadata{
 				case 1:
 					result.mod = 7;
 					result.shift = 3;
+					break;
 				case 2:
 					result.mod = 3;
 					result.shift = 2;
+					break;
 				case 4:
 					result.mod = 1;
 					result.shift = 1;
+					break;
 				default:
 					break;
 			}
@@ -723,10 +731,10 @@ public class TGA : Image, ImageMetadata{
 			file.rawWrite([footer]);
 		}
 	}
-	override int width() @nogc @safe @property const pure{
+	override uint width() @nogc @safe @property const pure{
 		return header.width;
 	}
-	override int height() @nogc @safe @property const pure{
+	override uint height() @nogc @safe @property const pure{
 		return header.height;
 	}
 	override bool isIndexed() @nogc @safe @property const pure{
@@ -793,68 +801,93 @@ public class TGA : Image, ImageMetadata{
 			default: return [];
 		}
 	}
-	public string getID(){
-		return cast(string)imageID;
+	public string getID() @safe{
+		return to!string(imageID);
 	}
-	public string getAuthor(){
+	public string getAuthor() @safe{
 		if(extensionArea.length)
 			return extensionArea[0].authorName;
 		return null;
 	}
-	public string getComment(){
+	public string getComment() @safe{
 		if(extensionArea.length)
 			return extensionArea[0].authorComments;
 		return null;
 	}
-	public string getJobName(){
+	public string getJobName() @safe{
 		if(extensionArea.length)
 			return extensionArea[0].jobName;
 		return null;
 	}
-	public string getSoftwareInfo(){
+	public string getSoftwareInfo() @safe{
 		if(extensionArea.length)
 			return extensionArea[0].softwareID;
 		return null;
 	}
-	public string getSoftwareVersion(){
+	public string getSoftwareVersion() @safe{
 		import std.conv : to;
 		if(extensionArea.length)
 			return to!string(extensionArea[0].softwareVersNum / 100) ~ "." ~ to!string((extensionArea[0].softwareVersNum % 100) 
 					/ 10) ~ "." ~ to!string(extensionArea[0].softwareVersNum % 10) ~ extensionArea[0].softwareVersChar;
 		return null;
 	}
-	public void setID(string val){
+	public void setID(string val) @safe{
 		if(val.length > 255)
 			throw new Exception("ID is too long");
 		imageID = val.dup;
 		header.idLength = cast(ubyte)val.length;
 	}
-	public void setAuthor(string val){
+	public void setAuthor(string val) @safe{
 		if(val.length > 41)
 			throw new Exception("Author name is too long");
-		memset(extensionArea[0].authorName.ptr, 0, extensionArea[0].authorName.length);
-		memcpy(extensionArea[0].authorName.ptr, val.ptr, val.length);
+		if(extensionArea.length){
+			stringCpy(extensionArea[0].authorName, val);
+		}
 	}
-	public void setComment(string val){
+	public void setComment(string val) @safe{
 		if(val.length > 324)
 			throw new Exception("Comment is too long");
-		memset(extensionArea[0].authorComments.ptr, 0, extensionArea[0].authorComments.length);
-		memcpy(extensionArea[0].authorComments.ptr, val.ptr, val.length);
+		if(extensionArea.length){
+			stringCpy(extensionArea[0].authorComments, val);
+		}
 	}
-	public void setJobName(string val){
+	public void setJobName(string val) @safe{
 		if(val.length > 41)
 			throw new Exception("Jobname is too long");
-		memset(extensionArea[0].jobName.ptr, 0, extensionArea[0].jobName.length);
-		memcpy(extensionArea[0].jobName.ptr, val.ptr, val.length);
+		if(extensionArea.length){
+			stringCpy(extensionArea[0].jobName, val);
+		}
 	}
-	public void setSoftwareInfo(string val){
+	public void setSoftwareInfo(string val) @safe{
 		if(val.length > 41)
 			throw new Exception("SoftwareID is too long");
-		memset(extensionArea[0].softwareID.ptr, 0, extensionArea[0].softwareID.length);
-		memcpy(extensionArea[0].softwareID.ptr, val.ptr, val.length);
+		if(extensionArea.length){
+			stringCpy(extensionArea[0].softwareID, val);
+		}
 	}
-	public void setSoftwareVersion(string val){
-
+	///Format used: 0.0.0a
+	public void setSoftwareVersion(string val) @safe{
+		if(extensionArea.length){
+			//separate first part with dot, then parse the number
+			uint prelimiter;
+			for( ; prelimiter < val.length ; prelimiter++){
+				if(val[prelimiter] == '.')
+					break;
+			}
+			uint resultI = to!uint(val[0..prelimiter]);
+			resultI *= 10;
+			for( ; prelimiter < val.length ; prelimiter++){
+				if(val[prelimiter] == '.')
+					break;
+			}
+			resultI += to!uint([val[prelimiter-1]]);
+			resultI *= 10;
+			if(val.length > prelimiter+1)
+				resultI += to!uint([val[prelimiter+1]]);
+			extensionArea[0].softwareVersNum = cast(ushort)resultI;
+			if(val.length > prelimiter+2)
+				extensionArea[0].softwareVersChar = val[prelimiter+2];
+		}
 	}
 	/**
 	 * Adds extension area for the file.
@@ -896,88 +929,16 @@ public class TGA : Image, ImageMetadata{
 	/**
 	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
 	 */
-	public void flipVertical(){
-		ubyte[] buffer;
-		const size_t workLength = (width * getBitdepth)>>3;
-		buffer.length = workLength;
-		ubyte* offset0 = imageData.ptr, offset1 = imageData.ptr + (height - 1) * workLength;
-		for(int y ; y < height>>1 ; y++){
-			memcpy(buffer.ptr, offset0, workLength);
-			memcpy(offset0, offset1, workLength);
-			memcpy(offset1, buffer.ptr, workLength);
-			offset0 += workLength;
-			offset1 -= workLength;
-		}
+	public override void flipVertical() @safe{
 		header.topOrigin = !header.topOrigin;
+		super.flipVertical;
 	}
 	/**
 	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
 	 */
-	public void flipHorizontal(){
-		if(isIndexed){
-			if(getBitdepth == 16){
-				for(int y ; y < height ; y++){
-					for(int x ; x < width>>1 ; x++){
-						const int x0 = width - x;
-						const ushort temp = readPixelIndex!(ushort)(x, y);
-						writePixel!(ushort)(x, y, readPixelIndex!(ushort)(x0, y));
-						writePixel!(ushort)(x0, y, temp);
-					}
-				}
-			}else{
-				for(int y ; y < height ; y++){
-					for(int x ; x < width>>1 ; x++){
-						const int x0 = width - x;
-						const ubyte temp = readPixelIndex!(ubyte)(x, y);
-						writePixel!(ubyte)(x, y, readPixelIndex!(ubyte)(x0, y));
-						writePixel!(ubyte)(x0, y, temp);
-					}
-				}
-			}
-		}else{
-			final switch(getBitdepth){
-				case 8:
-					for(int y ; y < height ; y++){
-						for(int x ; x < width>>1 ; x++){
-							const int x0 = width - x;
-							const ubyte temp = readPixel!(ubyte)(x, y);
-							writePixel!(ubyte)(x, y, readPixel!(ubyte)(x0, y));
-							writePixel!(ubyte)(x0, y, temp);
-						}
-					}
-					break;
-				case 16:
-					for(int y ; y < height ; y++){
-						for(int x ; x < width>>1 ; x++){
-							const int x0 = width - x;
-							const ushort temp = readPixel!(ushort)(x, y);
-							writePixel!(ushort)(x, y, readPixel!(ushort)(x0, y));
-							writePixel!(ushort)(x0, y, temp);
-						}
-					}
-					break;
-				case 24:
-					for(int y ; y < height ; y++){
-						for(int x ; x < width>>1 ; x++){
-							const int x0 = width - x;
-							const Pixel24Bit temp = readPixel!(Pixel24Bit)(x, y);
-							writePixel!(Pixel24Bit)(x, y, readPixel!(Pixel24Bit)(x0, y));
-							writePixel!(Pixel24Bit)(x0, y, temp);
-						}
-					}
-					break;
-				case 32:
-					for(int y ; y < height ; y++){
-						for(int x ; x < width>>1 ; x++){
-							const int x0 = width - x;
-							const Pixel32Bit temp = readPixel!(Pixel32Bit)(x, y);
-							writePixel!(Pixel32Bit)(x, y, readPixel!(Pixel32Bit)(x0, y));
-							writePixel!(Pixel32Bit)(x0, y, temp);
-						}
-					}
-					break;
-			}
-		}
+	public override void flipHorizontal() @safe{
+		header.rightSideOrigin = !header.rightSideOrigin;
+		super.flipHorizontal;
 	}
 }
 

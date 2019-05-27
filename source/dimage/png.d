@@ -27,16 +27,45 @@ public class PNG : Image{
 	static enum END_INIT = "IEND";			///Initializes the end of the file
 	static enum ubyte[8] PNG_SIGNATURE = [0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A];	///Used for checking PNG files
 	static enum ubyte[4] PNG_CLOSER = [0xAE, 0x42, 0x60, 0x82];		///Final checksum of IEND
-	/+/// *.png signature
-	struct PngSignature{
-		byte[8] signature;  /// Identifier (always 89504E470D0A1A0Ah) 
-	}+/
+	/// Used for static function load. Selects checksum checking policy.
+	static enum ChecksumPolicy : ubyte{
+		DisableAll,
+		DisableAncillary,
+		Enable
+	}
+	/**
+	 * Stores ancillary data embedded into PNG files. Handling these are not vital for opening PNG files, but available for various purposes.
+	 * Please be aware that certain readers might have issues with nonstandard chunks
+	 */
+	public class EmbeddedData{
+		/**
+		 * Describes where this data stream should go within the file.
+		 * This describe the exact location, and configured when loading from PNG files. WithinIDAT will result in dumping all of them before the last theoretical IDAT chunk.
+		 */
+		public enum DataPosition{
+			BeforePLTE,
+			BeforeIDAT,
+			WithinIDAT,
+			AfterIDAT
+		}
+		DataPosition	pos;	/// Describes the exact location of 
+		char[4]		identifier;	/// Identifies the data of this chunk
+		ubyte[]		data;		/// Contains the data of this chunk
+		/**
+		 * Creates an instance of this class.
+		 */
+		public this(DataPosition pos, char[4] identifier, ubyte[] data){
+			this.pos = pos;
+			this.identifier = identifier;
+			this.data = data;
+		}
+	}
 	/**
 	 * PNG Chunk identifier
 	 */
 	struct Chunk{
-		uint		dataLength;
-		char[4] 	identifier;
+		uint		dataLength;	///Length of chunk
+		char[4] 	identifier;	///Identifies the data of this chunk
 		/**
 		 * Converts the struct to little endian on systems that need them.
 		 */
@@ -68,7 +97,8 @@ public class PNG : Image{
 	/**
 	 * Contains most data related to PNG files.
 	 */
-	struct Header{
+	align(1) struct Header{
+	align(1):
 		uint		width;			/// Width of image in pixels 
     	uint		height;			/// Height of image in pixels 
     	ubyte		bitDepth;		/// Bits per pixel or per sample
@@ -109,6 +139,10 @@ public class PNG : Image{
 		}
 	}
 	protected Header header;
+	public EmbeddedData[] ancillaryChunks;		///Stores ancilliary chunks that are not essential for image processing
+	/**
+	 * Creates an empty PNG file in memory
+	 */
 	public this(int width, int height, ubyte bitDepth, ColorType colorType, ubyte compression, ubyte[] imageData, 
 			ubyte[] paletteData = []){
 		header = Header(width, height, bitDepth, colorType, compression, 0, 0);
@@ -120,13 +154,14 @@ public class PNG : Image{
 	 * Loads a PNG file.
 	 * Currently interlaced mode is unsupported.
 	 */
-	static PNG load(F = std.stdio.File, bool chksmTest = true)(ref F file){
+	static PNG load(F = std.stdio.File, ChecksumPolicy chksmTest = ChecksumPolicy.DisableAncillary)(ref F file){
 		//import std.zlib : UnCompress;
 		PNG result = new PNG();
 		bool iend;
+		EmbeddedData.DataPosition pos = EmbeddedData.DataPosition.BeforePLTE;
 		//auto decompressor = new UnCompress();
 		//initialize decompressor
-		int ret, flush;
+		int ret;
     	//uint have;
     	zlib.z_stream strm;
 		strm.zalloc = null;
@@ -161,6 +196,7 @@ public class PNG : Image{
 					break;
 				case PALETTE_INIT:
 					result.paletteData = readBuffer.dup;
+					pos = EmbeddedData.DataPosition.BeforeIDAT;
 					break;
 				case DATA_INIT:
 					//if(result.header.compression)
@@ -170,18 +206,31 @@ public class PNG : Image{
 					strm.next_in = readBuffer.ptr;
 					strm.avail_in = cast(uint)readBuffer.length;
 					ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
-					
+					pos = EmbeddedData.DataPosition.WithinIDAT;
 					if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
 						version(unittest) std.stdio.writeln(ret);
 						zlib.inflateEnd(&strm);
 						throw new Exception("Decompression error");
+					}else if(result.imageData.length == strm.total_out){
+						pos = EmbeddedData.DataPosition.AfterIDAT;
 					}
 					break;
 				case END_INIT:
+					//assert(result.imageData.length == strm.total_out, "");
+					if(result.imageData.length != strm.total_out){
+						zlib.inflateEnd(&strm);
+						throw new Exception("Decompression error");
+					}
 					iend = true;
 					break;
 				default:
-					//Leave unknown chunks alone
+					//Process any unknown chunk as embedded data
+					//EmbeddedData chnk = new EmbeddedData(pos, curChunk.identifier, readBuffer.dup);
+					result.addAncilliaryChunk(pos, curChunk.identifier, readBuffer.dup);
+					version (unittest) {
+						std.stdio.writeln ("Acilliary chunk found!");
+						std.stdio.writeln ("ID: " , curChunk.identifier, " size: ", readBuffer.length, " pos: ", pos);
+					}
 					break;
 			}
 			//calculate crc
@@ -190,9 +239,14 @@ public class PNG : Image{
 			readBuffer.length = 4;
 			file.rawRead(readBuffer);
 			readBuffer.reverse;
-			static if(chksmTest)
+			static if(chksmTest == ChecksumPolicy.Enable){
 				if(readBuffer != crc)
 					throw new ChecksumMismatchException("Checksum error");
+			}else static if(chksmTest == ChecksumPolicy.DisableAncillary){
+				if(readBuffer != crc && (curChunk.identifier == HEADER_INIT || curChunk.identifier == PALETTE_INIT || 
+						curChunk.identifier == DATA_INIT || curChunk.identifier == END_INIT))
+					throw new ChecksumMismatchException("Checksum error");
+			}
 			//}
 			readBuffer.length = 8;
 		}while(!iend);
@@ -221,21 +275,41 @@ public class PNG : Image{
 		//write Header into file
 		void[] writeBuffer;
 		//writeBuffer.length = 8;
-		writeBuffer ~= cast(void[])[Chunk(header.sizeof, HEADER_INIT).nativeToBigEndian];
+		writeBuffer = cast(void[])[Chunk(header.sizeof, HEADER_INIT).nativeToBigEndian];
 		file.rawWrite(writeBuffer);
-		writeBuffer.length = 0;
-		writeBuffer ~= cast(void[])[header.nativeToBigEndian];
+		//writeBuffer.length = 0;
+		writeBuffer = cast(void[])[header.nativeToBigEndian];
 		file.rawWrite(writeBuffer);
 		crc = crc32Of((cast(ubyte[])HEADER_INIT) ~ writeBuffer).dup.reverse;
 		file.rawWrite(crc);
+		//write any ancilliary chunks into the file that needs to stand before the palette
+		foreach (curChunk; ancillaryChunks){
+			if (curChunk.pos == EmbeddedData.DataPosition.BeforePLTE){
+				writeBuffer = cast(void[])[Chunk(cast(uint)curChunk.data.length, curChunk.identifier).nativeToBigEndian];
+				file.rawWrite(writeBuffer);
+				file.rawWrite(curChunk.data);
+				crc = crc32Of((cast(ubyte[])curChunk.identifier) ~ paletteData).dup.reverse;
+				file.rawWrite(crc);
+			}
+		}
 		//write palette into file if exists
 		if (paletteData.length) {
-			writeBuffer.length = 0;
-			writeBuffer ~= cast(void[])[Chunk(cast(uint)paletteData.length, PALETTE_INIT).nativeToBigEndian];
+			//writeBuffer.length = 0;
+			writeBuffer = cast(void[])[Chunk(cast(uint)paletteData.length, PALETTE_INIT).nativeToBigEndian];
 			file.rawWrite(writeBuffer);
 			file.rawWrite(paletteData);
 			crc = crc32Of((cast(ubyte[])PALETTE_INIT) ~ paletteData).dup.reverse;
 			file.rawWrite(crc);
+		}
+		//write any ancilliary chunks into the file that needs to stand before the imagedata
+		foreach (curChunk; ancillaryChunks){
+			if (curChunk.pos == EmbeddedData.DataPosition.BeforeIDAT){
+				writeBuffer = cast(void[])[Chunk(cast(uint)curChunk.data.length, curChunk.identifier).nativeToBigEndian];
+				file.rawWrite(writeBuffer);
+				file.rawWrite(curChunk.data);
+				crc = crc32Of((cast(ubyte[])curChunk.identifier) ~ paletteData).dup.reverse;
+				file.rawWrite(crc);
+			}
 		}
 		//compress imagedata if needed, then write it into the file
 		{	
@@ -251,24 +325,6 @@ public class PNG : Image{
 			strm.avail_in = cast(uint)imageData.length;
 			strm.next_out = output.ptr;
 			strm.avail_out = cast(uint)output.length;
-			/+do {
-				std.stdio.writeln(ret, ";", strm.avail_in, ";", strm.total_in, ";", strm.total_out);
-				if (!strm.avail_out) {
-					//writeBuffer.length = 0;
-					writeBuffer = cast(void[])[Chunk(cast(uint)output.length, DATA_INIT).nativeToBigEndian];
-					file.rawWrite(writeBuffer);
-					file.rawWrite(output);
-					crc = crc32Of((cast(ubyte[])DATA_INIT) ~ output).dup.reverse;
-					file.rawWrite(crc);
-					strm.next_out = output.ptr;
-					strm.avail_out = cast(uint)output.length;
-				}
-				ret = zlib.deflate(&strm, zlib.Z_NO_FLUSH);
-				if(ret < 0){
-					zlib.deflateEnd(&strm);
-					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
-				}
-			} while (strm.avail_in);+/
 			do {
 				//std.stdio.writeln(ret, ";", strm.avail_in, ";", strm.total_in, ";", strm.total_out);
 				if (!strm.avail_out) {
@@ -287,6 +343,16 @@ public class PNG : Image{
 					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
 				}
 			} while (ret != zlib.Z_STREAM_END);
+			//write any ancilliary chunks into the file that needs to stand within the imagedata
+			foreach (curChunk; ancillaryChunks){
+				if (curChunk.pos == EmbeddedData.DataPosition.WithinIDAT){
+					writeBuffer = cast(void[])[Chunk(cast(uint)curChunk.data.length, curChunk.identifier).nativeToBigEndian];
+					file.rawWrite(writeBuffer);
+					file.rawWrite(curChunk.data);
+					crc = crc32Of((cast(ubyte[])curChunk.identifier) ~ paletteData).dup.reverse;
+					file.rawWrite(crc);
+				}
+			}
 			if (strm.avail_out != output.length) {
 				writeBuffer = cast(void[])[Chunk(cast(uint)(output.length - strm.avail_out), DATA_INIT).nativeToBigEndian];
 				file.rawWrite(writeBuffer);
@@ -296,16 +362,29 @@ public class PNG : Image{
 			}
 			zlib.deflateEnd(&strm);
 		}
+		//write any ancilliary chunks into the file that needs to stand after the imagedata
+		foreach (curChunk; ancillaryChunks){
+			if (curChunk.pos == EmbeddedData.DataPosition.AfterIDAT){
+				writeBuffer = cast(void[])[Chunk(cast(uint)curChunk.data.length, curChunk.identifier).nativeToBigEndian];
+				file.rawWrite(writeBuffer);
+				file.rawWrite(curChunk.data);
+				crc = crc32Of((cast(ubyte[])curChunk.identifier) ~ paletteData).dup.reverse;
+				file.rawWrite(crc);
+			}
+		}
 		//write IEND chunk
 		//writeBuffer.length = 0;
 		writeBuffer = cast(void[])[Chunk(0, END_INIT).nativeToBigEndian];
 		file.rawWrite(writeBuffer);
 		file.rawWrite(PNG_CLOSER);
 	}
-	override int width() @nogc @safe @property const pure{
+	public void addAncilliaryChunk(EmbeddedData.DataPosition pos, char[4] identifier, ubyte[] data){
+		ancillaryChunks ~= new EmbeddedData(pos, identifier, data);
+	}
+	override uint width() @nogc @safe @property const pure{
 		return header.width;
 	}
-	override int height() @nogc @safe @property const pure{
+	override uint height() @nogc @safe @property const pure{
 		return header.height;
 	}
 	override bool isIndexed() @nogc @safe @property const pure{
@@ -329,7 +408,7 @@ public class PNG : Image{
 	override uint getPixelFormat() @nogc @safe @property const pure{
 		switch(header.colorType){
 			case ColorType.GreyscaleWithAlpha:
-				return PixelFormat.CA88;
+				return PixelFormat.YA88;
 			case ColorType.TrueColor:
 				return header.bitDepth == 8 ? PixelFormat.RGB888 : PixelFormat.RGBX5551;
 			case ColorType.TrueColorWithAlpha:
@@ -364,8 +443,8 @@ unittest{
 		std.stdio.writeln("Loading ", indexedPNGFile.name);
 		PNG a = PNG.load(indexedPNGFile);
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
-		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
-		//a.save(output);
+		std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
+		a.save(output);
 		VFile virtualIndexedPNGFile;
 		a.save(virtualIndexedPNGFile);
 		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
