@@ -51,9 +51,33 @@ public class TGA : Image, ImageMetadata{
 			UncompressedMapped		=	1,
 			UncompressedTrueColor	=	2,
 			UncompressedGrayscale	=	3,
-			RLEMapped				=	9,
+			RLEMapped				=	9,	/// RLE in 8 bit chunks
 			RLETrueColor			=	10,
 			RLEGrayscale			=	11,
+			/**
+			 * RLE optimized for 4 bit bitmaps. Added by me. Also works with 2 and 1 bit bitmaps
+			 * Packet layout:
+			 * bits 0 - 3: index needs to written
+			 * bits 4 - 7: repeated occurence of indexes + 1 (1-16)
+			 */
+			RLE4BitMapped			=	12,
+			/**
+			 * RLE optimized for 1 bit bitmaps. Added by me.
+			 * Packet layout:
+			 * Every odd numbered byte: n of zeros (0-255)
+			 * Every even numbered byte: n of ones (0-255)
+			 */
+			RLE1BitMapped			=	13,
+			/**
+			 * Mapped image with Huffman-Delta-RLE compression.
+			 * I can't find any info on how this works, so I currently just leaving it as a placeholder
+			 */
+			HDRLEMapped				=	32,
+			/**
+			 * Mapped image with Huffman-Delta-RLE compression with 4-pass quadtree-type process.
+			 * I can't find any info on how this works, so I currently just leaving it as a placeholder
+			 */
+			HDRLEMappedQT			=	33
 		}
 		ubyte			idLength;           /// length in bytes
 		ubyte			colorMapType;		/// See ColorMapType enumerator
@@ -71,7 +95,7 @@ public class TGA : Image, ImageMetadata{
 			ubyte, "alphaChannelBits", 4, 
 			bool , "rightSideOrigin", 1, 
 			bool , "topOrigin", 1, 
-			ubyte, "reserved", 2, 
+			ubyte, "interleaving", 2, 
 		));
 		public string toString(){
 			import std.conv : to;
@@ -784,9 +808,9 @@ public class TGA : Image, ImageMetadata{
 	 */
 	override public ubyte[] getPixelOrder() @safe @property const{
 		switch(header.pixelDepth){
-			case 1: return pixelOrder1BitBE.dup;
-			case 2: return pixelOrder2BitBE.dup;
-			case 4: return pixelOrder4BitBE.dup;
+			case 1: return pixelOrder1BitLE.dup;
+			case 2: return pixelOrder2BitLE.dup;
+			case 4: return pixelOrder4BitLE.dup;
 			default: return [];
 		}
 	}
@@ -795,9 +819,9 @@ public class TGA : Image, ImageMetadata{
 	 */
 	override public ubyte[] getPixelOrderBitshift() @safe @property const{
 		switch(header.pixelDepth){
-			case 1: return pixelShift1BitBE.dup;
-			case 2: return pixelShift2BitBE.dup;
-			case 4: return pixelShift4BitBE.dup;
+			case 1: return pixelShift1BitLE.dup;
+			case 2: return pixelShift2BitLE.dup;
+			case 4: return pixelShift4BitLE.dup;
 			default: return [];
 		}
 	}
@@ -1001,6 +1025,10 @@ unittest{
 		greyscaleRLE = TGA.load!VFile(virtualFile);
 		std.stdio.writeln("Load from virtual file was successful");
 		compareImages(greyscaleUnc, greyscaleRLE);
+		//std.stdio.writeln(greyscaleUnc.palette);
+		/+foreach (c ; greyscaleUnc.palette) {
+			std.stdio.writeln();
+		}+/
 	}
 	{
 		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/concreteGUIE3.tga");

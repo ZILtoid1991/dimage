@@ -8,8 +8,12 @@
 module dimage.base;
 
 import std.bitmanip;
+import std.range : InputRange;
 
 import dimage.util;
+
+import vfile;
+//import std.stdio;
 
 /**
  * Interface for image orientation for files that support them.
@@ -45,20 +49,126 @@ public interface ImageMetadata{
  * to truecolor.
  */
 abstract class Image{
-	protected static const ubyte[2] pixelOrder4BitBE = [0xF0, 0x0F];
-	protected static const ubyte[2] pixelOrder4BitLE = [0x0F, 0xF0];
-	protected static const ubyte[2] pixelShift4BitBE = [0x04, 0x00];
-	protected static const ubyte[2] pixelShift4BitLE = [0x00, 0x04];
-	protected static const ubyte[4] pixelOrder2BitBE = [0b1100_0000, 0b0011_0000, 0b0000_1100, 0b0000_0011];
-	protected static const ubyte[4] pixelOrder2BitLE = [0b0000_0011, 0b0000_1100, 0b0011_0000, 0b1100_0000];
-	protected static const ubyte[4] pixelShift2BitBE = [0x06, 0x04, 0x02, 0x00];
-	protected static const ubyte[4] pixelShift2BitLE = [0x00, 0x02, 0x04, 0x06];
-	protected static const ubyte[8] pixelOrder1BitBE = [0b1000_0000, 0b0100_0000, 0b0010_0000, 0b0001_0000,
+	protected static const ubyte[2] pixelOrder4BitLE = [0xF0, 0x0F];
+	protected static const ubyte[2] pixelOrder4BitBE = [0x0F, 0xF0];
+	protected static const ubyte[2] pixelShift4BitLE = [0x04, 0x00];
+	protected static const ubyte[2] pixelShift4BitBE = [0x00, 0x04];
+	protected static const ubyte[4] pixelOrder2BitLE = [0b1100_0000, 0b0011_0000, 0b0000_1100, 0b0000_0011];
+	protected static const ubyte[4] pixelOrder2BitBE = [0b0000_0011, 0b0000_1100, 0b0011_0000, 0b1100_0000];
+	protected static const ubyte[4] pixelShift2BitLE = [0x06, 0x04, 0x02, 0x00];
+	protected static const ubyte[4] pixelShift2BitBE = [0x00, 0x02, 0x04, 0x06];
+	protected static const ubyte[8] pixelOrder1BitLE = [0b1000_0000, 0b0100_0000, 0b0010_0000, 0b0001_0000,
 			0b0000_1000, 0b0000_0100, 0b0000_0010, 0b0000_0001];
-	protected static const ubyte[8] pixelOrder1BitLE = [0b0000_0001, 0b0000_0010, 0b0000_0100, 0b0000_1000,
+	protected static const ubyte[8] pixelOrder1BitBE = [0b0000_0001, 0b0000_0010, 0b0000_0100, 0b0000_1000,
 			0b0001_0000, 0b0010_0000, 0b0100_0000, 0b1000_0000];
-	protected static const ubyte[8] pixelShift1BitBE = [0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00];
-	protected static const ubyte[8] pixelShift1BitLE = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07];
+	protected static const ubyte[8] pixelShift1BitLE = [0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00];
+	protected static const ubyte[8] pixelShift1BitBE = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07];
+	/**
+	 * Can be used for foreach through all palette indicles.
+	 * Might replace the old method of safe accessing the palette.
+	 */
+	//struct PaletteRange {
+	class PaletteRange : InputRange!Pixel32BitARGB {
+		protected size_t 		pos;		///Indicates the current position in the palette
+		protected size_t		paletteBitdepth;	///Bitdepth of the palette's indicles
+		protected PixelFormat	format;		///Format of the palette
+		protected ubyte[]		_palette;	///The source that is being read
+		///CTOR
+		this (size_t paletteBitdepth, PixelFormat format, ubyte[] _palette) pure @safe @nogc nothrow {
+			this.paletteBitdepth = paletteBitdepth;
+			this.format = format;
+			this._palette = _palette;
+		}
+		///Returns the current element
+    	@property Pixel32BitARGB front() pure @safe {
+			const size_t offset = pos * (paletteBitdepth / 8);
+			ubyte[] colorInput = _palette[offset..offset + (paletteBitdepth / 8)];
+			Pixel32BitARGB colorOutput;
+			switch (format) {
+				case PixelFormat.ARGB8888, PixelFormat.XRGB8888:
+					colorOutput = reinterpretGet!Pixel32BitARGB(colorInput);
+					break;
+				case PixelFormat.RGBA8888, PixelFormat.RGBX8888:
+					colorOutput = Pixel32BitARGB(reinterpretGet!Pixel32BitRGBA(colorInput));
+					break;
+				case PixelFormat.RGBA5551, PixelFormat.RGBX5551:
+					colorOutput = Pixel32BitARGB(reinterpretGet!PixelRGBA5551(colorInput));
+					break;
+				case PixelFormat.RGB565:
+					colorOutput = Pixel32BitARGB(reinterpretGet!PixelRGB565(colorInput));
+					break;
+				case PixelFormat.RGB888:
+					colorOutput = Pixel32BitARGB(reinterpretGet!Pixel24Bit(colorInput));
+					break;
+				default:
+					throw new ImageFormatException("Unknown format");
+			}
+			return colorOutput;
+		}
+    	///Returns the first element and increases the position by one
+    	Pixel32BitARGB moveFront() pure @safe {
+			Pixel32BitARGB colorOutput = front;
+			popFront;
+			return colorOutput;
+		}
+    	///Increases the index by one if the end hasn't been reached.
+    	void popFront() pure @safe @nogc nothrow {
+			if (_palette.length != pos * (paletteBitdepth / 8)) pos++;
+		}
+    	///Returns true if the end has been reached.
+    	@property bool empty() pure @safe @nogc nothrow {
+			return _palette.length == pos * (paletteBitdepth / 8);
+		}
+    	///Used for random access.
+    	Pixel32BitARGB opIndex(size_t index) pure @safe {
+			const size_t offset = index * (paletteBitdepth / 8);
+			ubyte[] colorInput = _palette[offset..offset + (paletteBitdepth / 8)];
+			Pixel32BitARGB colorOutput;
+			switch (format) {
+				case PixelFormat.ARGB8888, PixelFormat.XRGB8888:
+					colorOutput = reinterpretGet!Pixel32BitARGB(colorInput);
+					break;
+				case PixelFormat.RGBA8888, PixelFormat.RGBX8888:
+					colorOutput = Pixel32BitARGB(reinterpretGet!Pixel32BitRGBA(colorInput));
+					break;
+				case PixelFormat.RGBA5551, PixelFormat.RGBX5551:
+					colorOutput = Pixel32BitARGB(reinterpretGet!PixelRGBA5551(colorInput));
+					break;
+				case PixelFormat.RGB565:
+					colorOutput = Pixel32BitARGB(reinterpretGet!PixelRGB565(colorInput));
+					break;
+				case PixelFormat.RGB888:
+					colorOutput = Pixel32BitARGB(reinterpretGet!Pixel24Bit(colorInput));
+					break;
+				default:
+					throw new ImageFormatException("Unknown format");
+			}
+			return colorOutput;
+		}
+    	///Returns the length of the palette
+    	@property size_t length() pure @safe @nogc nothrow {
+			return _palette.length / (paletteBitdepth / 8);
+		}
+    	///
+    	alias opDollar = length;
+		/**`foreach` iteration uses opApply, since one delegate call per loop
+     	 * iteration is faster than three virtual function calls.
+     	 */
+    	int opApply(scope int delegate(Pixel32BitARGB) dlg){
+			if (empty) return 0;
+			else {
+				return (dlg(moveFront));
+			}
+		}
+
+    	/// Ditto
+    	int opApply(scope int delegate(size_t, Pixel32BitARGB) dlg){
+			if (empty) return 0;
+			else {
+				return (dlg(pos, moveFront));
+			}
+		}
+	}
 	/**
 	 * Raw image data. Cast the data to whatever data you need at the moment.
 	 */
@@ -79,22 +189,28 @@ abstract class Image{
 	abstract uint getPixelFormat() @nogc @safe @property const pure;
 	abstract uint getPalettePixelFormat() @nogc @safe @property const pure;
 	/**
+	 * Returns a palette range, which can be used to read the palette.
+	 */
+	public PaletteRange palette() @safe @property pure {
+		return PaletteRange(getPaletteBitdepth, cast(PixelFormat)getPalettePixelFormat, paletteData);
+	}
+	/**
 	 * Returns the pixel order for bitdepths less than 8. Almost excusively used for indexed bitmaps.
 	 * Returns null if ordering not needed.
 	 */
-	public ubyte[] getPixelOrder() @safe @property const{
+	public ubyte[] getPixelOrder() @safe @property const pure {
 		return [];
 	}
 	/**
 	 * Returns which pixel how much needs to be shifted right after a byteread.
 	 */
-	public ubyte[] getPixelOrderBitshift() @safe @property const{
+	public ubyte[] getPixelOrderBitshift() @safe @property const pure {
 		return [];
 	}
 	/**
 	 * Reads a single 32bit pixel. If the image is indexed, a color lookup will be done.
 	 */
-	public Pixel32Bit readPixel(uint x, uint y) @safe{
+	public Pixel32Bit readPixel(uint x, uint y) @safe pure {
 		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds");
 		}
@@ -122,7 +238,7 @@ abstract class Image{
 	 * Reads the given type of pixel from the image.
 	 * Throws an ImageFormatException, if the pixel does not match the requested format.
 	 */
-	public T readPixel(T)(uint x, uint y) @safe {
+	public T readPixel(T)(uint x, uint y) @safe pure {
 		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds");
 		}
@@ -140,8 +256,8 @@ abstract class Image{
 	/**
 	 * Reads an index, if the image isn't indexed throws an ImageFormatException.
 	 */
-	public T readPixelIndex(T = ubyte)(uint x, uint y) @safe
-			if(T.stringof == ushort.stringof || T.stringof == ubyte.stringof){
+	public T readPixelIndex(T = ubyte)(uint x, uint y) @safe pure
+			if(T.stringof == ushort.stringof || T.stringof == ubyte.stringof) {
 		if(x >= width || y >= height || x < 0 || y < 0){
 			throw new ImageBoundsException("Image is being read out of bounds!");
 		}
@@ -181,7 +297,7 @@ abstract class Image{
 	/**
 	 * Looks up the index on the palette, then returns the color value as a 32 bit value.
 	 */
-	public Pixel32Bit readPalette(ushort index) @safe{
+	public Pixel32Bit readPalette(ushort index) @safe pure {
 		if(!isIndexed)
 			throw new ImageFormatException("Image isn't indexed!");
 		final switch(getPaletteBitdepth){
@@ -210,7 +326,7 @@ abstract class Image{
 	/**
 	 * Looks up the index on the palette, then returns the color value in the requested format.
 	 */
-	public T readPalette(T)(ushort index) @safe{
+	public T readPalette(T)(ushort index) @safe pure {
 		if(!isIndexed)
 			throw new ImageFormatException("Image isn't indexed!");
 		if(T.sizeof * 8 != getPaletteBitdepth)
@@ -226,7 +342,7 @@ abstract class Image{
 	 * ushort: all 16bit indexed formats.
 	 * Any other pixel structs are used for direct color.
 	 */
-	public T writePixel(T)(uint x, uint y, T pixel) @safe {
+	public T writePixel(T)(uint x, uint y, T pixel) @safe pure {
 		if(x >= width || y >= height)
 			throw new ImageBoundsException("Image is being written out of bounds!");
 		
@@ -269,19 +385,19 @@ abstract class Image{
 	/**
 	 * Returns the raw image data.
 	 */
-	public ubyte[] getImageData() @nogc @safe nothrow{
+	public ubyte[] getImageData() @nogc @safe nothrow pure {
 		return imageData;
 	}
 	/**
 	 * Returns the raw palette data.
 	 */
-	public ubyte[] getPaletteData() @nogc @safe nothrow{
+	public ubyte[] getPaletteData() @nogc @safe nothrow pure {
 		return paletteData;
 	}
 	/**
 	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
 	 */
-	public void flipVertical() @safe{
+	public void flipVertical() @safe pure {
 		import std.algorithm.mutation : swapRanges;
 		//header.topOrigin = !header.topOrigin;
 		const size_t workLength = (width * getBitdepth)>>3;
@@ -293,7 +409,7 @@ abstract class Image{
 	/**
 	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
 	 */
-	public void flipHorizontal() @safe{
+	public void flipHorizontal() @safe pure {
 		if(isIndexed){
 			if(getBitdepth == 16){
 				for(int y ; y < height ; y++){
@@ -380,37 +496,44 @@ struct Pixel32BitARGB {
 	///Alpha
     @safe @nogc @property pure ref auto a() inout { return bytes[3]; }
 	///Creates a standard pixel representation out from a 4 element array
-    @nogc this(ubyte[4] bytes) @safe{
+    this(ubyte[4] bytes) @safe @nogc pure{
         this.bytes = bytes;
     }
 	///Creates a standard pixel representation out from 4 separate values
-    @nogc this(ubyte r, ubyte g, ubyte b, ubyte a) @safe{
+    this(ubyte r, ubyte g, ubyte b, ubyte a) @safe @nogc pure {
         bytes[0] = b;
         bytes[1] = g;
         bytes[2] = r;
         bytes[3] = a;
     }
 	///Creates a standard pixel representation out of an RGBA5551 value
-    @nogc this(PixelRGBA5551 p) @safe{
+    this(PixelRGBA5551 p) @safe @nogc pure {
         bytes[0] = cast(ubyte)(p.b<<3 | p.b>>2);
         bytes[1] = cast(ubyte)(p.g<<3 | p.g>>2);
         bytes[2] = cast(ubyte)(p.r<<3 | p.r>>2);
         bytes[3] = p.a ? 0xFF : 0x00;
     }
 	///Creates a standard pixel representation out of an RGB565 value
-	@nogc this(PixelRGB565 p) @safe{
+	this(PixelRGB565 p) @safe @nogc pure {
         bytes[0] = cast(ubyte)(p.b<<3 | p.b>>2);
         bytes[1] = cast(ubyte)(p.g<<2 | p.g>>4);
         bytes[2] = cast(ubyte)(p.r<<3 | p.r>>2);
         bytes[3] = 0xFF;
     }
 	///Creates a standard pixel representation out of an RGB888 value
-    @nogc this(Pixel24Bit p) @safe{
+    this(Pixel24Bit p) @safe @nogc pure {
         bytes[0] = p.b;
         bytes[1] = p.g;
         bytes[2] = p.r;
         bytes[3] = 0xFF;
     }
+	///Creates a standard  pixel representation out of an RGBA8888 value
+	this(Pixel32BitRGBA p) @safe @nogc pure {
+		bytes[0] = p.b;
+        bytes[1] = p.g;
+        bytes[2] = p.r;
+        bytes[3] = p.a;
+	}
 }
 /**
  * Standard 32 bit pixel representation.
@@ -520,9 +643,9 @@ align(1) struct Pixel24Bit {
  * Undefined should be used for all indexed bitmaps, except 16 bit big endian ones, in which case a single BigEndian bit should be set high.
  * Lower 16 bits should be used for general identification, upper 16 bits are general identificators (endianness, valid alpha channel, etc).
  * 0x01 - 0x1F are reserved for 16 bit truecolor, 0x20 - 0x2F are reserved for 24 bit truecolor, 0x30 - 3F are reserved for integer grayscale,
- * 0x40 - 0x5F are reserved for 32 bit truecolor 
+ * 0x40 - 0x5F are reserved for 32 bit truecolor, 0xF00-0xF0F are reserved for "chunky" indexed images.
  */
-enum PixelFormat : uint{
+enum PixelFormat : uint {
 	BigEndian		=	0x00_01_00_00,		///Always little endian if bit not set
 	ValidAlpha		=	0x00_02_00_00,		///If high, alpha is used
 	RGBX5551		=	0x1,
@@ -535,10 +658,19 @@ enum PixelFormat : uint{
 	RGBA8888		=	RGBX8888 | ValidAlpha,
 	XRGB8888		=	0x41,
 	ARGB8888		=	XRGB8888 | ValidAlpha,
+	Indexed1Bit		=	0xF00,
+	Indexed2Bit		=	0xF01,
+	Indexed4Bit		=	0xF02,
+	Indexed8Bit		=	0xF03,
+	Indexed16Bit	=	0xF04,
 	
 	Undefined		=	0,
 }
-
+/+/**
+ * Function pointer to set up external virtual file readers from e.g. archives if extra files need to be read.
+ * If null, then the file will be read from disk instead from the same folder as the image file that needs the extra file.
+ */
+shared VFile delegate(string filename) getVFile @trusted;+/
 /**
  * Thrown if image is being read or written out of bounds.
  */
