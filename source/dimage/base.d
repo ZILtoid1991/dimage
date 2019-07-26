@@ -192,7 +192,7 @@ abstract class Image{
 	 * Returns a palette range, which can be used to read the palette.
 	 */
 	public PaletteRange palette() @safe @property pure {
-		return PaletteRange(getPaletteBitdepth, cast(PixelFormat)getPalettePixelFormat, paletteData);
+		return new PaletteRange(getPaletteBitdepth, cast(PixelFormat)getPalettePixelFormat, paletteData);
 	}
 	/**
 	 * Returns the pixel order for bitdepths less than 8. Almost excusively used for indexed bitmaps.
