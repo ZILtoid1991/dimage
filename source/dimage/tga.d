@@ -790,7 +790,7 @@ public class TGA : Image, ImageMetadata{
 		if(Header.ColorMapType.NoColorMapPresent){
 			return PixelFormat.Undefined;
 		}else{
-			switch(header.pixelDepth){
+			switch(header.colorMapDepth){
 				case 16:
 					return PixelFormat.RGBA5551;
 				case 24:

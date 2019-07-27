@@ -13,7 +13,6 @@ import std.range : InputRange;
 import dimage.util;
 
 import vfile;
-//import std.stdio;
 
 /**
  * Interface for image orientation for files that support them.
@@ -74,9 +73,12 @@ abstract class Image{
 		protected PixelFormat	format;		///Format of the palette
 		protected ubyte[]		_palette;	///The source that is being read
 		///CTOR
-		this (size_t paletteBitdepth, PixelFormat format, ubyte[] _palette) pure @safe @nogc nothrow {
+		this (size_t paletteBitdepth, PixelFormat format, ubyte[] _palette) @safe {
+			//writeln(0);
+			assert(paletteBitdepth);
 			this.paletteBitdepth = paletteBitdepth;
 			this.format = format;
+			assert(_palette);
 			this._palette = _palette;
 		}
 		///Returns the current element
@@ -191,7 +193,7 @@ abstract class Image{
 	/**
 	 * Returns a palette range, which can be used to read the palette.
 	 */
-	public PaletteRange palette() @safe @property pure {
+	public PaletteRange palette() @safe /+ @property pure+/ {
 		return new PaletteRange(getPaletteBitdepth, cast(PixelFormat)getPalettePixelFormat, paletteData);
 	}
 	/**
@@ -533,6 +535,11 @@ struct Pixel32BitARGB {
         bytes[1] = p.g;
         bytes[2] = p.r;
         bytes[3] = p.a;
+	}
+	///String representation of this struct
+	string toString() @safe pure {
+		import std.conv : to;
+		return to!string(r) ~ "," ~ to!string(g) ~ "," ~ to!string(b) ~ "," ~ to!string(a);
 	}
 }
 /**
