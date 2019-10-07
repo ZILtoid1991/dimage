@@ -282,8 +282,8 @@ public class TGA : Image, ImageMetadata{
 					result ~= dataBuffer[1..$] ~ literalBlock;
 				}
 			}
-			std.stdio.writeln(result.length, ";", (header.width * header.height * bytedepth));
-			assert(result.length == (header.width * header.height * bytedepth), "RLE overrun error!");
+			//std.stdio.writeln(result.length, ";", (header.width * header.height * bytedepth));
+			assert(result.length == (header.width * header.height * bytedepth), "RLE length mismatch error!");
 			return result;
 		}
 		Header headerLoad;
@@ -294,7 +294,7 @@ public class TGA : Image, ImageMetadata{
 		char[] imageIDLoad;
 		imageIDLoad.length = headerLoad.idLength;
 		if(imageIDLoad.length) file.rawRead(imageIDLoad);
-		version(unittest) std.stdio.writeln(imageIDLoad);
+		//version(unittest) std.stdio.writeln(imageIDLoad);
 		ubyte[] palette;
 		palette.length = headerLoad.colorMapLength * (headerLoad.colorMapDepth / 8);
 		if(palette.length) file.rawRead(palette);
@@ -303,7 +303,7 @@ public class TGA : Image, ImageMetadata{
 			image = loadRLEImageData(headerLoad);
 		}else{
 			image.length = (headerLoad.width * headerLoad.height * headerLoad.pixelDepth) / 8;
-			version(unittest) std.stdio.writeln(headerLoad.toString);
+			//version(unittest) std.stdio.writeln(headerLoad.toString);
 			if(image.length) file.rawRead(image);
 		}
 		static if(loadExtArea || loadDevArea){
@@ -973,9 +973,16 @@ unittest{
 		assert(a.width == b.width);
 		assert(a.height == b.height);
 		//Check if the data in the two are identical
-		for(ushort y; y < a.height; y++){
-			for(ushort x; x < a.width; x++){
+		for (ushort y ; y < a.height ; y++) {
+			for (ushort x ; x < a.width ; x++) {
 				assert(a.readPixel(x,y) == b.readPixel(x,y), "Error at position (" ~ to!string(x) ~ "," ~ to!string(y) ~ ")!");
+			}
+		}
+		if (a.isIndexed && b.isIndexed) {
+			auto aPal = a.palette;
+			auto bPal = b.palette;
+			for (ushort i ; i < aPal.length ; i++) {
+				assert(aPal[i] == bPal[i], "Error at position " ~ to!string(i) ~ "!");
 			}
 		}
 	}

@@ -437,6 +437,13 @@ unittest{
 				assert(a.readPixel(x,y) == b.readPixel(x,y), "Error at position (" ~ to!string(x) ~ "," ~ to!string(y) ~ ")!");
 			}
 		}
+		if (a.isIndexed && b.isIndexed) {
+			auto aPal = a.palette;
+			auto bPal = b.palette;
+			for (ushort i ; i < aPal.length ; i++) {
+				assert(aPal[i] == bPal[i], "Error at position " ~ to!string(i) ~ "!");
+			}
+		}
 	}
 	{
 		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE24.png");
