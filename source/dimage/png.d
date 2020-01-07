@@ -17,6 +17,9 @@ static import std.stdio;
 static import std.string;
 import std.string : fromStringz;
 import core.stdc.stdint;
+import bitleveld.datatypes;
+import dimage.util;
+import std.conv : to;
 /**
  * Implements the Portable Network Graphics file format as a class.
  */
@@ -138,8 +141,13 @@ public class PNG : Image{
  				"interlace: " ~ to!string(interlace) ~ "\n"; 
 		}
 	}
-	protected Header header;
-	public EmbeddedData[] ancillaryChunks;		///Stores ancilliary chunks that are not essential for image processing
+	protected Header		header;
+	public EmbeddedData[]	ancillaryChunks;		///Stores ancilliary chunks that are not essential for image processing
+	protected ubyte[]		filterBytes;			///Filterbytes for each scanline
+	protected size_t pitch;
+	mixin ChunkyAccess4Bit;
+	mixin ChunkyAccess2Bit;
+	mixin MonochromeAccess;
 	/**
 	 * Creates an empty PNG file in memory
 	 */
@@ -159,7 +167,7 @@ public class PNG : Image{
 		PNG result = new PNG();
 		bool iend;
 		EmbeddedData.DataPosition pos = EmbeddedData.DataPosition.BeforePLTE;
-		//auto decompressor = new UnCompress();
+		version (unittest) uint scanlineCounter;
 		//initialize decompressor
 		int ret;
     	//uint have;
@@ -171,7 +179,7 @@ public class PNG : Image{
 		if(ret != zlib.Z_OK)
 			throw new Exception("Decompressor initialization error");
 
-		ubyte[] readBuffer;
+		ubyte[] readBuffer, imageBuffer;
 		readBuffer.length = 8;
 		file.rawRead(readBuffer);
 		for(int i ; i < 8 ; i++)
@@ -190,9 +198,14 @@ public class PNG : Image{
 				case HEADER_INIT:
 					result.header = *(cast(Header*)(cast(void*)readBuffer.ptr));
 					result.header.bigEndianToNative;
-					result.imageData.length = (result.header.width * result.header.height * result.getBitdepth) / 8;
-					strm.next_out = result.imageData.ptr;
-					strm.avail_out = cast(uint)result.imageData.length;
+					version (unittest) std.stdio.writeln(result.header);
+					result.pitch = (result.header.width * result.getBitdepth) / 8;
+					version (unittest) std.stdio.writeln("Pitch length: ", result.pitch);
+					imageBuffer.length = result.pitch + 1;
+					version (unittest) std.stdio.writeln(imageBuffer.length);
+					strm.next_out = imageBuffer.ptr;
+					strm.avail_out = cast(uint)imageBuffer.length;
+					//result.pitch = result.header.width;
 					break;
 				case PALETTE_INIT:
 					result.paletteData = readBuffer.dup;
@@ -200,27 +213,42 @@ public class PNG : Image{
 					break;
 				case DATA_INIT:
 					//if(result.header.compression)
-					//result.imageData ~= cast(ubyte[])decompressor.uncompress(cast(void[])readBuffer);
+					//imageBuffer ~= cast(ubyte[])decompressor.uncompress(cast(void[])readBuffer);
 					//else
-					//	result.imageData ~= readBuffer.dup;
+					//	imageBuffer ~= readBuffer.dup;
+					pos = EmbeddedData.DataPosition.WithinIDAT;
 					strm.next_in = readBuffer.ptr;
 					strm.avail_in = cast(uint)readBuffer.length;
-					ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
-					pos = EmbeddedData.DataPosition.WithinIDAT;
-					if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
-						version(unittest) std.stdio.writeln(ret);
-						zlib.inflateEnd(&strm);
-						throw new Exception("Decompression error");
-					}else if(result.imageData.length == strm.total_out){
-						pos = EmbeddedData.DataPosition.AfterIDAT;
+					while (strm.avail_in) {
+						ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
+						if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
+							version(unittest) std.stdio.writeln(ret);
+							zlib.inflateEnd(&strm);
+							throw new Exception("Decompression error");
+						}else if(imageBuffer.length == strm.total_out){
+							pos = EmbeddedData.DataPosition.AfterIDAT;
+						}
+						if (!strm.avail_out) {//flush scanline into imagedata
+							version (unittest) scanlineCounter++;
+							version (unittest) assert (scanlineCounter <= result.header.height, "Scanline overflow!");
+							result.imageData ~= imageBuffer[0..$-1];
+							result.filterBytes ~= imageBuffer[$-1];
+							strm.next_out = imageBuffer.ptr;
+							strm.avail_out = cast(uint)imageBuffer.length;
+						}
 					}
+					
 					break;
 				case END_INIT:
-					//assert(result.imageData.length == strm.total_out, "");
-					if(result.imageData.length != strm.total_out){
+					version (unittest) assert(result.header.height == scanlineCounter, "Scanline count mismatch");
+					if(result.imageData.length + result.filterBytes.length > strm.total_out){
 						zlib.inflateEnd(&strm);
-						throw new Exception("Decompression error");
+						//version(unittest) std.stdio.writeln()
+						throw new Exception("Decompression error! Image ended at: " ~ to!string(strm.total_out) ~ 
+						"; Required length: " ~ to!string(result.imageData.length));
 					}
+					result.imageData.reserve(result.height * result.pitch);
+					result.filterBytes.reserve(result.height);
 					iend = true;
 					break;
 				default:
@@ -249,20 +277,75 @@ public class PNG : Image{
 			}
 			//}
 			readBuffer.length = 8;
-		}while(!iend);
+		} while(!iend);
 		zlib.inflateEnd(&strm);//should have no data remaining
-		/+result.imageData = cast(ubyte[])zlib.uncompress(result.imageData, (result.header.width * result.header.height * 
-				result.header.bitDepth)/8);+/
-		//if(result.header.compression){
-		//result.imageData ~= cast(ubyte[])decompressor.flush();
-		//}
-		version(unittest){
-			std.stdio.writeln(result.header.toString);
-			std.stdio.writeln(result.imageData.length);
-		}
-		//assert(result.imageData.length == (result.header.width * result.header.height * result.header.bitDepth)/8);
-		//result.imageData.length = (result.header.width * result.header.height * result.header.bitDepth)/8;
+		/+for (int line ; line < result.height ; line++) {
+			result.imageData ~= imageBuffer[0..result.pitch];
+			result.filterBytes ~= imageBuffer[result.pitch];
+			if (imageBuffer.length)
+				imageBuffer = imageBuffer[result.pitch + 1..$];
+		}+/
+		assert(result.imageData.length == result.pitch * result.header.height, "Image size mismatch. Expected size: " ~ 
+				to!string(result.pitch * result.header.height) ~ "; Actual size: " ~ to!string(result.imageData.length) ~ 
+				"; Pitch length: " ~ to!string(result.pitch) ~ "; N of scanlines: " ~ to!string(result.header.height));
+		result.setupDelegates();
 		return result;
+	}
+	/**
+	 * Sets up all the function pointers automatically.
+	 */
+	protected void setupDelegates() @safe pure {
+		if (header.colorType == ColorType.Greyscale || header.colorType == ColorType.Indexed) {
+			switch (header.bitDepth) {
+				case 1:
+					indexReader8Bit = &_readIndex_1bit;
+					indexWriter8Bit = &_writeIndex_1bit;
+					indexReader16bit = &_indexReadUpconv;
+					pixelReader = &_readAndLookup;
+					break;
+				case 2:
+					indexReader8Bit = &_readIndex_2bit;
+					indexWriter8Bit = &_writeIndex_2bit;
+					indexReader16bit = &_indexReadUpconv;
+					pixelReader = &_readAndLookup;
+					break;
+				case 4:
+					indexReader8Bit = &_readIndex_4bit;
+					indexWriter8Bit = &_writeIndex_4bit;
+					indexReader16bit = &_indexReadUpconv;
+					pixelReader = &_readAndLookup;
+					break;
+				case 8:
+					if (header.colorType == ColorType.Greyscale) {
+						pixelReader = &_readPixelAndUpconv!(ubyte);
+					} else {
+						indexReader8Bit = &_readPixel_8bit;
+						indexWriter8Bit = &_writePixel!(ubyte);
+						indexReader16bit = &_indexReadUpconv;
+						pixelReader = &_readAndLookup;
+					}
+					break;
+				default:
+					break;
+			}
+			if (header.colorType == ColorType.Indexed) {
+				paletteReader = &_paletteReader!Pixel24BitBE;
+			}
+		} else {
+			switch (getPixelFormat()){
+				case PixelFormat.RGBA8888:
+					pixelReader = &_readPixelAndUpconv!(Pixel32BitRGBABE);
+					break;
+				case PixelFormat.RGB888:
+					pixelReader = &_readPixelAndUpconv!(Pixel24BitBE);
+					break;
+				case PixelFormat.YA88:
+					pixelReader = &_readPixelAndUpconv!(PixelYA88);
+					break;
+				default:
+					break;
+			}
+		}
 	}
 	/**
 	 * Saves the file to the disk.
@@ -314,15 +397,21 @@ public class PNG : Image{
 		//compress imagedata if needed, then write it into the file
 		{	
 			int ret;
-    		//uint have;
+			ubyte[] input, output;
+			input.reserve(imageData.length + filterBytes.length);
+			for (int line ; line < height ; line++){
+				const size_t offset = line * pitch;
+				input ~= imageData[offset..offset+pitch];
+				input ~= filterBytes[line];
+			}
+    		
     		zlib.z_stream strm;
 			ret = zlib.deflateInit(&strm, compLevel);
 			if (ret != zlib.Z_OK)
-				throw new Exception("Compressor initialization error");
-			ubyte[] output;
+				throw new Exception("Compressor initialization error");	
 			output.length = 32 * 1024;//cast(uint)imageData.length;
-			strm.next_in = imageData.ptr;
-			strm.avail_in = cast(uint)imageData.length;
+			strm.next_in = input.ptr;
+			strm.avail_in = cast(uint)input.length;
 			strm.next_out = output.ptr;
 			strm.avail_out = cast(uint)output.length;
 			do {
@@ -420,38 +509,44 @@ public class PNG : Image{
 	override uint getPalettePixelFormat() @nogc @safe @property const pure{
 		return PixelFormat.RGB888;
 	}
-	public ref Header getHeader() @nogc @safe{
+	/**
+	 * Returns the header.
+	 */
+	public ref Header getHeader() @nogc @safe pure{
 		return header;
 	}
+	
 }
 
 unittest{
-	import std.conv : to;
 	import vfile;
-	void compareImages(Image a, Image b){
+	import dimage.tga;
+	/+void compareImages(Image a, Image b){
 		assert(a.width == b.width);
 		assert(a.height == b.height);
 		//Check if the data in the two are identical
 		for(ushort y; y < a.height; y++){
 			for(ushort x; x < a.width; x++){
-				assert(a.readPixel(x,y) == b.readPixel(x,y), "Error at position (" ~ to!string(x) ~ "," ~ to!string(y) ~ ")!");
+				assert(a.readPixel(x,y) == b.readPixel(x,y), "Error at position (" ~ to!string(x) ~ "," ~ to!string(y) ~ ")! \n" ~ 
+						"a = " ~ to!string(a.readPixel(x,y)) ~ " ; b = " ~ to!string(b.readPixel(x,y)));
 			}
 		}
-		if (a.isIndexed && b.isIndexed) {
+		/+if (a.isIndexed && b.isIndexed) {
 			auto aPal = a.palette;
 			auto bPal = b.palette;
 			for (ushort i ; i < aPal.length ; i++) {
 				assert(aPal[i] == bPal[i], "Error at position " ~ to!string(i) ~ "!");
 			}
-		}
-	}
+		}+/
+	}+/
 	{
 		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE24.png");
 		std.stdio.writeln("Loading ", indexedPNGFile.name);
 		PNG a = PNG.load(indexedPNGFile);
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
-		std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
-		a.save(output);
+		assert(a.getBitdepth == 24, "Bitdepth error!");
+		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
+		//a.save(output);
 		VFile virtualIndexedPNGFile;
 		a.save(virtualIndexedPNGFile);
 		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
@@ -466,8 +561,8 @@ unittest{
 		std.stdio.writeln("Loading ", indexedPNGFile.name);
 		PNG a = PNG.load(indexedPNGFile);
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
-		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
-		//a.save(output);
+		std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
+		a.save(output);
 		VFile virtualIndexedPNGFile;
 		a.save(virtualIndexedPNGFile);
 		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
@@ -476,5 +571,33 @@ unittest{
 		std.stdio.writeln("Image restored from virtual file");
 		compareImages(a, b);
 		std.stdio.writeln("The two images' output match");
+	}
+	//test against TGA versions of the same images
+	{
+		std.stdio.File tgaSource = std.stdio.File("./test/tga/mapped_8.tga");
+		std.stdio.File pngSource = std.stdio.File("./test/png/mapped_8.png");
+		std.stdio.writeln("Loading ", tgaSource.name);
+		TGA tgaImage = TGA.load(tgaSource);
+		std.stdio.writeln("Loading ", pngSource.name);
+		PNG pngImage = PNG.load(pngSource);
+		compareImages!true(tgaImage, pngImage);
+	}
+	{
+		std.stdio.File tgaSource = std.stdio.File("./test/tga/truecolor_24.tga");
+		std.stdio.File pngSource = std.stdio.File("./test/png/truecolor_24.png");
+		std.stdio.writeln("Loading ", tgaSource.name);
+		TGA tgaImage = TGA.load(tgaSource);
+		std.stdio.writeln("Loading ", pngSource.name);
+		PNG pngImage = PNG.load(pngSource);
+		compareImages!true(tgaImage, pngImage);
+	}
+	{
+		std.stdio.File tgaSource = std.stdio.File("./test/tga/truecolor_32.tga");
+		std.stdio.File pngSource = std.stdio.File("./test/png/truecolor_32.png");
+		std.stdio.writeln("Loading ", tgaSource.name);
+		TGA tgaImage = TGA.load(tgaSource);
+		std.stdio.writeln("Loading ", pngSource.name);
+		PNG pngImage = PNG.load(pngSource);
+		compareImages!true(tgaImage, pngImage);
 	}
 }

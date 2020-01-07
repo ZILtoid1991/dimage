@@ -3,41 +3,49 @@
  * by Laszlo Szeremi
  *
  * Copyright under Boost Software License.
+ *
+ * Note: Many elements of this file might be outsourced to an external library.
  */
 
 module dimage.util;
 
-/**
- * Safely casts one type of an array to another.
- */
-T[] reinterpretCast(T, U)(ref U[] input) @trusted pure {
-	T[] _reinterpretCast() @system pure {
-		return cast(T[])(cast(void[])input);
-	}
-	if ((U.sizeof * input.length) % T.sizeof == 0) {
-		return _reinterpretCast();
-	} else {
-		throw new Exception("Cannot cast safely!");
-	}
-}
-/**
- * Safely casts one type of an array to a single instance of a type.
- */
-T reinterpretGet(T, U)(ref U[] input) @trusted pure {
-	T _reinterpretGet() @system pure {
-		return (cast(T[])(cast(void[])input))[0];
-	}
-	if (U.sizeof * input.length == T.sizeof) {
-		return _reinterpretGet;
-	} else {
-		throw new Exception("Cannot cast safely!");
-	}
-}
+public import bitleveld.reinterpret;
+
 /**
  * Copies the content of a string array into a static char array
  */
 void stringCpy(CR)(ref CR target, string input) {
 	for(size_t i ; i < input.length ; i++){
 		target[i] = input[i];
+	}
+}
+/**
+ * Adam7 deinterlacing algorithm
+ */
+ubyte[] adam7(ubyte[] input, size_t bytedepth) {
+	return null;
+}
+/**
+ * Image compatison for unittests
+ */
+version(unittest) {
+	import dimage.base;
+	import std.conv : to;
+	void compareImages(bool ignoreAlpha = false) (Image a, Image b) {
+		assert (a.height == b.height);
+		assert (a.width == b.width);
+		for(int y ; y < a.height ; y++) {
+			for(int x ; x < a.width ; x++) {
+				auto pixelA = a.readPixel(x,y);
+				auto pixelB = b.readPixel(x,y);
+				static if(ignoreAlpha) {
+					assert(pixelA.r == pixelB.r && pixelA.g == pixelB.g && pixelA.b == pixelB.b, "Pixel mismatch at position " ~ 
+							to!string(x) ~ ";" ~ to!string(y) ~ "\nA = " ~ pixelA.toString ~ "; B = " ~ pixelB.toString);
+				} else {
+					assert(pixelA == pixelB, "Pixel mismatch at position " ~ 
+							to!string(x) ~ ";" ~ to!string(y) ~ "\nA = " ~ pixelA.toString ~ "; B = " ~ pixelB.toString);
+				}
+			}
+		}
 	}
 }

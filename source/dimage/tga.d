@@ -12,6 +12,7 @@ static import std.stdio;
 
 public import dimage.base;
 import dimage.util;
+import bitleveld.datatypes;
 
 //import core.stdc.string;
 import std.conv : to;
@@ -212,9 +213,13 @@ public class TGA : Image, ImageMetadata{
 	protected ExtArea[]		extensionArea;
 	protected DevAreaTag[]	developerAreaTags;
 	protected DevArea[]		developerArea;
+	protected size_t		pitch;
 	public uint[]			scanlineTable;				///stores offset to scanlines
     public ubyte[]			postageStampImage;			///byte 0 is width, byte 1 is height
     public ushort[]			colorCorrectionTable;		///color correction table
+	mixin ChunkyAccess4Bit;
+	mixin ChunkyAccess2Bit;
+	mixin MonochromeAccess;
 	/**
 	 * Creates a TGA object without a footer.
 	 */
@@ -356,26 +361,14 @@ public class TGA : Image, ImageMetadata{
 					}
 				}
 			}
-			switch(headerLoad.pixelDepth){
-				case 1:
-					result.mod = 7;
-					result.shift = 3;
-					break;
-				case 2:
-					result.mod = 3;
-					result.shift = 2;
-					break;
-				case 4:
-					result.mod = 1;
-					result.shift = 1;
-					break;
-				default:
-					break;
-			}
+			result.setupDelegates();
 			return result;
 		}else{
-			return new TGA(headerLoad, image, palette, imageIDLoad);
+			TGA result = new TGA(headerLoad, image, palette, imageIDLoad);
+			result.setupDelegates();
+			return result;
 		}
+			
 	}
 	/**
 	 * Saves the current TGA object into a Truevision TARGA file.
@@ -755,6 +748,79 @@ public class TGA : Image, ImageMetadata{
 			file.rawWrite([footer]);
 		}
 	}
+	/**
+	 * Sets up all the function pointers automatically.
+	 */
+	protected void setupDelegates() @safe pure {
+		void _createBitArray() @trusted pure {
+			bitArray = BitArray(reinterpretCast!void(imageData), pitch * header.width);
+		}
+		switch(header.pixelDepth){
+			case 1:
+				indexReader8Bit = &_readIndex_1bit;
+				indexWriter8Bit = &_writeIndex_1bit;
+				indexReader16bit = &_indexReadUpconv;
+				pitch = width + (header.width % 8 ? 8 - header.width % 8 : 0);
+				_createBitArray;
+				pixelReader = &_readAndLookup;
+				break;
+			case 2:
+				indexReader8Bit = &_readIndex_2bit;
+				indexWriter8Bit = &_writeIndex_2bit;
+				indexReader16bit = &_indexReadUpconv;
+				pixelReader = &_readAndLookup;
+				break;
+			case 4:
+				indexReader8Bit = &_readIndex_4bit;
+				indexWriter8Bit = &_writeIndex_4bit;
+				indexReader16bit = &_indexReadUpconv;
+				pixelReader = &_readAndLookup;
+				break;
+			case 8:
+				if (header.colorMapDepth) {
+					indexReader8Bit = &_readPixel_8bit;
+					indexWriter8Bit = &_writePixel!(ubyte);
+					indexReader16bit = &_indexReadUpconv;
+					pixelReader = &_readAndLookup;
+				} else {
+					pixelReader = &_readPixelAndUpconv!(ubyte);
+				}
+				break;
+			case 16:
+				if (header.colorMapDepth) {
+					indexWriter16bit = &_writePixel!(ushort);
+					indexReader16bit = &_readPixel_16bit;
+					pixelReader = &_readAndLookup;
+				} else {
+					pixelReader = &_readPixelAndUpconv!(PixelRGBA5551);
+				}
+				break;
+			case 24:
+				pixelReader = &_readPixelAndUpconv!(Pixel24Bit);
+				break;
+			case 32:
+				pixelReader = &_readPixel!(Pixel32Bit);
+				break;
+			default:
+				break;
+		}
+		switch (header.colorMapDepth) {
+			case 8:
+				paletteReader = &_paletteReader!ubyte;
+				break;
+			case 16:
+				paletteReader = &_paletteReader!PixelRGBA5551;
+				break;
+			case 24:
+				paletteReader = &_paletteReader!Pixel24Bit;
+				break;
+			case 32:
+				paletteReader = &_paletteReader!Pixel32Bit;
+				break;
+			default:
+				break;
+		}
+	}
 	override uint width() @nogc @safe @property const pure{
 		return header.width;
 	}
@@ -802,29 +868,6 @@ public class TGA : Image, ImageMetadata{
 			}
 		}
 	}
-	/**
-	 * Returns the pixel order for bitdepths less than 8. Almost excusively used for indexed bitmaps.
-	 * Returns null if ordering not needed.
-	 */
-	override public ubyte[] getPixelOrder() @safe @property const{
-		switch(header.pixelDepth){
-			case 1: return pixelOrder1BitLE.dup;
-			case 2: return pixelOrder2BitLE.dup;
-			case 4: return pixelOrder4BitLE.dup;
-			default: return [];
-		}
-	}
-	/**
-	 * Returns which pixel how much needs to be shifted right after a byteread.
-	 */
-	override public ubyte[] getPixelOrderBitshift() @safe @property const{
-		switch(header.pixelDepth){
-			case 1: return pixelShift1BitLE.dup;
-			case 2: return pixelShift2BitLE.dup;
-			case 4: return pixelShift4BitLE.dup;
-			default: return [];
-		}
-	}
 	public string getID() @safe{
 		return to!string(imageID);
 	}
@@ -855,42 +898,51 @@ public class TGA : Image, ImageMetadata{
 					/ 10) ~ "." ~ to!string(extensionArea[0].softwareVersNum % 10) ~ extensionArea[0].softwareVersChar;
 		return null;
 	}
-	public void setID(string val) @safe{
+	public string setID(string val) @safe{
 		if(val.length > 255)
 			throw new Exception("ID is too long");
 		imageID = val.dup;
 		header.idLength = cast(ubyte)val.length;
+		return val;
 	}
-	public void setAuthor(string val) @safe{
+	public string setAuthor(string val) @safe{
 		if(val.length > 41)
 			throw new Exception("Author name is too long");
 		if(extensionArea.length){
 			stringCpy(extensionArea[0].authorName, val);
+			return val;
 		}
+		return null;
 	}
-	public void setComment(string val) @safe{
+	public string setComment(string val) @safe{
 		if(val.length > 324)
 			throw new Exception("Comment is too long");
 		if(extensionArea.length){
 			stringCpy(extensionArea[0].authorComments, val);
+			return val;
 		}
+		return null;
 	}
-	public void setJobName(string val) @safe{
+	public string setJobName(string val) @safe{
 		if(val.length > 41)
 			throw new Exception("Jobname is too long");
 		if(extensionArea.length){
 			stringCpy(extensionArea[0].jobName, val);
+			return val;
 		}
+		return null;
 	}
-	public void setSoftwareInfo(string val) @safe{
+	public string setSoftwareInfo(string val) @safe{
 		if(val.length > 41)
 			throw new Exception("SoftwareID is too long");
 		if(extensionArea.length){
 			stringCpy(extensionArea[0].softwareID, val);
+			return val;
 		}
+		return null;
 	}
 	///Format used: 0.0.0a
-	public void setSoftwareVersion(string val) @safe{
+	public string setSoftwareVersion(string val) @safe{
 		if(extensionArea.length){
 			//separate first part with dot, then parse the number
 			uint prelimiter;
@@ -911,7 +963,9 @@ public class TGA : Image, ImageMetadata{
 			extensionArea[0].softwareVersNum = cast(ushort)resultI;
 			if(val.length > prelimiter+2)
 				extensionArea[0].softwareVersChar = val[prelimiter+2];
+			return val;
 		}
+		return null;
 	}
 	/**
 	 * Adds extension area for the file.
@@ -964,12 +1018,20 @@ public class TGA : Image, ImageMetadata{
 		header.rightSideOrigin = !header.rightSideOrigin;
 		super.flipHorizontal;
 	}
+	///Returns true if the image originates from the top
+	public override bool topOrigin() @property @nogc @safe pure const {
+		return header.topOrigin;
+	}
+	///Returns true if the image originates from the right
+	public override bool rightSideOrigin() @property @nogc @safe pure const {
+		return header.rightSideOrigin;
+	}
 }
 
 unittest{
 	import std.conv : to;
 	import vfile;
-	void compareImages(Image a, Image b){
+	/+void compareImages(Image a, Image b){
 		assert(a.width == b.width);
 		assert(a.height == b.height);
 		//Check if the data in the two are identical
@@ -985,7 +1047,7 @@ unittest{
 				assert(aPal[i] == bPal[i], "Error at position " ~ to!string(i) ~ "!");
 			}
 		}
-	}
+	}+/
 	assert(TGA.Header.sizeof == 18);
 	//void[] tempStream;
 	//test 8 bit RLE load for 8 bit greyscale and indexed

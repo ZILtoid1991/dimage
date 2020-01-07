@@ -4,6 +4,11 @@ authors "Laszlo Szeremi"
 copyright "Copyright © 2018, Laszlo Szeremi"
 license "Boost"
 target "library"
+dependency "bitleveld" version="0.1.0-alpha"
 configuration "unittest"{
 	dependency "vfile" version="*"
+}
+configuration "lzwsupport" {
+	dependency "lzwford" version="*"
+	versions "lzwsupport"
 }
