@@ -231,8 +231,8 @@ public class PNG : Image{
 						if (!strm.avail_out) {//flush scanline into imagedata
 							version (unittest) scanlineCounter++;
 							version (unittest) assert (scanlineCounter <= result.header.height, "Scanline overflow!");
-							result.imageData ~= imageBuffer[0..$-1];
-							result.filterBytes ~= imageBuffer[$-1];
+							result.imageData ~= imageBuffer[1..$];
+							result.filterBytes ~= imageBuffer[0];
 							strm.next_out = imageBuffer.ptr;
 							strm.avail_out = cast(uint)imageBuffer.length;
 						}
@@ -401,8 +401,8 @@ public class PNG : Image{
 			input.reserve(imageData.length + filterBytes.length);
 			for (int line ; line < height ; line++){
 				const size_t offset = line * pitch;
-				input ~= imageData[offset..offset+pitch];
 				input ~= filterBytes[line];
+				input ~= imageData[offset..offset+pitch];
 			}
     		
     		zlib.z_stream strm;
