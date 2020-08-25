@@ -52,7 +52,7 @@ public class TGA : Image, ImageMetadata{
 			UncompressedMapped		=	1,
 			UncompressedTrueColor	=	2,
 			UncompressedGrayscale	=	3,
-			RLEMapped				=	9,	/// RLE in 8 bit chunks
+			RLEMapped				=	9,	/// RLE in 8 or 16 bit chunks
 			RLETrueColor			=	10,
 			RLEGrayscale			=	11,
 			/**
@@ -98,6 +98,80 @@ public class TGA : Image, ImageMetadata{
 			bool , "topOrigin", 1, 
 			ubyte, "interleaving", 2, 
 		));
+		///Sets the colormapdepth of the image
+		public void setColorMapDepth(uint format) @safe pure {
+			switch (format) {
+				case PixelFormat.Grayscale8Bit:
+					colorMapDepth = 8;
+					break;
+				case PixelFormat.RGBX5551, PixelFormat.RGBA5551:
+					colorMapDepth = 16;
+					break;
+				/+case PixelFormat.RGB565:
+					colorMapDepth = 16;
+					break;+/
+				case PixelFormat.RGB888:
+					colorMapDepth = 24;
+					break;
+				case PixelFormat.RGBX8888, PixelFormat.RGBA8888:
+					colorMapDepth = 32;
+					break;
+				default: throw new ImageFormatException("Palette format not supported!");
+			}
+		}
+		///Sets the pixeldepth of the image
+		public void setImageType(uint format, bool isRLE) @safe pure {
+			switch (format) {
+				case PixelFormat.Grayscale8Bit:
+					pixelDepth = 8;
+					if (isRLE) imageType = ImageType.RLEGrayscale;
+					else imageType = ImageType.UncompressedGrayscale;
+					break;
+				case PixelFormat.Indexed8Bit:
+					pixelDepth = 8;
+					if (isRLE) imageType = ImageType.RLEMapped;
+					else imageType = ImageType.UncompressedMapped;
+					break;
+				case PixelFormat.Indexed16Bit:
+					pixelDepth = 16;
+					if (isRLE) imageType = ImageType.RLEMapped;
+					else imageType = ImageType.UncompressedMapped;
+					break;
+				case PixelFormat.Indexed4Bit:
+					pixelDepth = 4;
+					if (isRLE) imageType = ImageType.RLE4BitMapped;
+					else imageType = ImageType.UncompressedMapped;
+					break;
+				case PixelFormat.Indexed2Bit:
+					pixelDepth = 2;
+					if (isRLE) imageType = ImageType.RLEMapped;
+					else imageType = ImageType.UncompressedMapped;
+					break;
+				case PixelFormat.Indexed1Bit:
+					pixelDepth = 1;
+					if (isRLE) imageType = ImageType.RLE1BitMapped;
+					else imageType = ImageType.UncompressedMapped;
+					break;
+				case PixelFormat.RGBA5551, PixelFormat.RGBX5551:
+					pixelDepth = 16;
+					alphaChannelBits = 1;
+					if (isRLE) imageType = ImageType.RLETrueColor;
+					else imageType = ImageType.UncompressedTrueColor;
+					break;
+				case PixelFormat.RGB888:
+					pixelDepth = 24;
+					if (isRLE) imageType = ImageType.RLETrueColor;
+					else imageType = ImageType.UncompressedTrueColor;
+					break;
+				case PixelFormat.RGBX8888, PixelFormat.RGBA8888:
+					pixelDepth = 32;
+					alphaChannelBits = 8;
+					if (isRLE) imageType = ImageType.RLETrueColor;
+					else imageType = ImageType.UncompressedTrueColor;
+					break;
+				default: throw new ImageFormatException("Palette format not supported!");
+			}
+		}
 		public string toString(){
 			import std.conv : to;
 			return 
@@ -112,6 +186,7 @@ public class TGA : Image, ImageMetadata{
 			"width:" ~ to!string(width) ~ "\n" ~
 			"height:" ~ to!string(height) ~ "\n" ~
 			"pixelDepth:" ~ to!string(pixelDepth);
+			
 		}
 	}
 	/**
@@ -197,7 +272,6 @@ public class TGA : Image, ImageMetadata{
 	 */
 	struct DevArea{
 	    ubyte[] data;
-
 	    /**
 	     * Returns the data as a certain type (preferrably struct) if available
 	     */
@@ -217,26 +291,43 @@ public class TGA : Image, ImageMetadata{
 	public uint[]			scanlineTable;				///stores offset to scanlines
     public ubyte[]			postageStampImage;			///byte 0 is width, byte 1 is height
     public ushort[]			colorCorrectionTable;		///color correction table
-	mixin ChunkyAccess4Bit;
-	mixin ChunkyAccess2Bit;
-	mixin MonochromeAccess;
+	///Empty CTOR for loading
+	protected this() @nogc @safe pure nothrow {
+
+	}
 	/**
 	 * Creates a TGA object without a footer.
 	 */
-	public this(Header header, ubyte[] imageData, ubyte[] paletteData = null, char[] imageID = null){
+	public this(Header header, IImageData _imageData, IPalette _palette = null, char[] imageID = null) @safe {
 		this.header = header;
-		this.imageData = imageData;
-		this.paletteData = paletteData;
+		this._imageData = _imageData;
+		this._palette = _palette;
 		this.imageID = imageID;
+	}
+	/**
+	 * Creates a TGA file safely with automatically generated header.
+	 */
+	public this(IImageData _imageData, IPalette _palette = null, char[] imageID = null, bool isRLE = false) @safe {
+		this._imageData = _imageData;
+		this._palette = _palette;
+		this.imageID = imageID;
+		header.width = cast(ubyte)_imageData.width;
+		header.height = cast(ubyte)_imageData.height;
+		if(_palette) {
+			header.colorMapLength = cast(ushort)this._palette.length;
+			header.colorMapDepth = this._palette.bitDepth;
+			header.colorMapType = Header.ColorMapType.ColorMapPresent;
+		}
+		header.setImageType(_imageData.pixelFormat, isRLE);
 	}
 	/**
 	 * Creates a TGA object with a footer.
 	 */
-	public this(Header header, Footer footer, ubyte[] imageData, ubyte[] paletteData = null, char[] imageID = null){
+	public this(Header header, Footer footer, IImageData _imageData, IPalette _palette = null, char[] imageID = null) @safe {
 		this.header = header;
 		this.footer = footer;
-		this.imageData = imageData;
-		this.paletteData = paletteData;
+		this._imageData = _imageData;
+		this._palette = _palette;
 		this.imageID = imageID;
 	}
 	/**
@@ -245,7 +336,8 @@ public class TGA : Image, ImageMetadata{
 	 */
 	public static TGA load(FILE = std.stdio.File, bool loadDevArea = true, bool loadExtArea = true)(ref FILE file){
 		import std.stdio;
-		ubyte[] loadRLEImageData(const ref Header header){
+		TGA result = new TGA();
+		ubyte[] loadRLEImageData(const ref Header header) {
 			size_t target = header.width * header.height;
 			const size_t bytedepth = header.pixelDepth >= 8 ? (header.pixelDepth / 8) : 1;
 			target >>= header.pixelDepth < 8 ? 1 : 0;
@@ -253,7 +345,7 @@ public class TGA : Image, ImageMetadata{
 			target >>= header.pixelDepth < 2 ? 1 : 0;
 			ubyte[] result, dataBuffer;
 			result.reserve(header.pixelDepth >= 8 ? target * bytedepth : target);
-			switch(header.pixelDepth){
+			switch(header.pixelDepth) {
 				case 15, 16:
 					dataBuffer.length = 3;
 					break;
@@ -291,37 +383,76 @@ public class TGA : Image, ImageMetadata{
 			assert(result.length == (header.width * header.height * bytedepth), "RLE length mismatch error!");
 			return result;
 		}
-		Header headerLoad;
 		ubyte[] readBuffer;
 		readBuffer.length = Header.sizeof;
 		file.rawRead(readBuffer);
-		headerLoad = reinterpretCast!Header(readBuffer)[0];
-		char[] imageIDLoad;
-		imageIDLoad.length = headerLoad.idLength;
-		if(imageIDLoad.length) file.rawRead(imageIDLoad);
-		//version(unittest) std.stdio.writeln(imageIDLoad);
+		result.header = reinterpretGet!Header(readBuffer);
+		result.imageID.length = result.header.idLength;
+		if (result.imageID.length) file.rawRead(result.imageID);
 		ubyte[] palette;
-		palette.length = headerLoad.colorMapLength * (headerLoad.colorMapDepth / 8);
-		if(palette.length) file.rawRead(palette);
+		palette.length = result.header.colorMapLength * (result.getPaletteBitdepth / 8);
+		if (palette.length) {
+			file.rawRead(palette);
+			switch (result.getPalettePixelFormat) {
+				case PixelFormat.Grayscale8Bit:
+					result._palette = new Palette!ubyte(palette, PixelFormat.Grayscale8Bit, 8);
+					break;
+				case PixelFormat.RGBA5551:
+					result._palette = new Palette!RGBA5551(reinterpretCast!RGBA5551(palette), PixelFormat.RGBA5551, 16);
+					break;
+				case PixelFormat.RGB888:
+					result._palette = new Palette!RGB888(reinterpretCast!RGB888(palette), PixelFormat.RGB888, 24);
+					break;
+				case PixelFormat.ARGB8888:
+					result._palette = new Palette!ARGB8888(reinterpretCast!ARGB8888(palette), PixelFormat.ARGB8888, 32);
+					break;
+				default: throw new ImageFileException("Unknown palette type!");
+			}
+		}
 		ubyte[] image;
-		if(headerLoad.imageType >= Header.ImageType.RLEMapped && headerLoad.imageType <= Header.ImageType.RLEGrayscale){
-			image = loadRLEImageData(headerLoad);
-		}else{
-			image.length = (headerLoad.width * headerLoad.height * headerLoad.pixelDepth) / 8;
-			//version(unittest) std.stdio.writeln(headerLoad.toString);
+		if (result.header.imageType >= Header.ImageType.RLEMapped && result.header.imageType <= Header.ImageType.RLEGrayscale) {
+			image = loadRLEImageData(result.header);
+		} else {
+			image.length = (result.header.width * result.header.height * result.header.pixelDepth) / 8;
 			if(image.length) file.rawRead(image);
 		}
+		if (image.length) {
+			switch (result.getPixelFormat) {
+				case PixelFormat.Grayscale8Bit:
+					result._imageData = new ImageData!ubyte(image, result.width, result.height, PixelFormat.Grayscale8Bit, 8);
+					break;
+				case PixelFormat.RGBA5551:
+					result._imageData = new ImageData!RGBA5551(reinterpretCast!RGBA5551(image), result.width, result.height, 
+							PixelFormat.RGBA5551, 16);
+					break;
+				case PixelFormat.RGB888:
+					result._imageData = new ImageData!RGB888(reinterpretCast!RGB888(image), result.width, result.height, 
+							PixelFormat.RGB888, 24);
+					break;
+				case PixelFormat.ARGB8888:
+					result._imageData = new ImageData!ARGB8888(reinterpretCast!ARGB8888(image), result.width, result.height, 
+							PixelFormat.ARGB8888, 32);
+					break;
+				case PixelFormat.Indexed8Bit:
+					result._imageData = new IndexedImageData!ubyte(image, result._palette, result.width, result.height);
+					break;
+				case PixelFormat.Indexed16Bit:
+					result._imageData = new IndexedImageData!ushort(reinterpretCast!ushort(image), result._palette, result.width, 
+							result.height);
+					break;
+				default: throw new ImageFileException("Unknown Image type!");
+			}
+		}
 		static if(loadExtArea || loadDevArea){
-			Footer footerLoad;
 			readBuffer.length = Footer.sizeof;
-			file.seek(Footer.sizeof * -1, SEEK_END);
+			file.seek(cast(int)Footer.sizeof * -1, SEEK_END);
 			file.rawRead(readBuffer);
-			footerLoad = reinterpretCast!Footer(readBuffer)[0];
-			TGA result = new TGA(headerLoad, footerLoad, image, palette, imageIDLoad);
-			if(footerLoad.isValid){
+			result.footer = reinterpretGet!Footer(readBuffer);
+			//TGA result = new TGA(result.header, footerLoad, image, palette, imageIDLoad);
+			if(result.footer.isValid){
 				static if(loadDevArea){
-					if(footerLoad.developerAreaOffset){
-						file.seek(footerLoad.developerAreaOffset);
+					if(result.footer.developerAreaOffset){
+						file.seek(result.footer.developerAreaOffset);
 						result.developerAreaTags.length = 1;
 						file.rawRead(result.developerAreaTags);
 						result.developerAreaTags.length = result.developerAreaTags[0].reserved;
@@ -337,8 +468,8 @@ public class TGA : Image, ImageMetadata{
 					}
 				}
 				static if(loadExtArea){
-					if(footerLoad.extensionAreaOffset){
-						file.seek(footerLoad.extensionAreaOffset);
+					if(result.footer.extensionAreaOffset){
+						file.seek(result.footer.extensionAreaOffset);
 						result.extensionArea.length = 1;
 						file.rawRead(result.extensionArea);
 						if(result.extensionArea[0].postageStampOffset){
@@ -354,18 +485,16 @@ public class TGA : Image, ImageMetadata{
 							file.rawRead(result.colorCorrectionTable);
 						}
 						if(result.extensionArea[0].scanlineOffset){
-							result.scanlineTable.length = headerLoad.height;
+							result.scanlineTable.length = result.header.height;
 							file.seek(result.extensionArea[0].scanlineOffset);
 							file.rawRead(result.scanlineTable);
 						}
 					}
 				}
 			}
-			result.setupDelegates();
 			return result;
 		}else{
-			TGA result = new TGA(headerLoad, image, palette, imageIDLoad);
-			result.setupDelegates();
+			//TGA result = new TGA(result.header, image, palette, imageIDLoad);
 			return result;
 		}
 			
@@ -378,7 +507,9 @@ public class TGA : Image, ImageMetadata{
 	public void save(FILE = std.stdio.File, bool saveDevArea = false, bool saveExtArea = false, 
 			bool ignoreScanlineBounds = false)(ref FILE file){
 		import std.stdio;
-		void compressRLE(){
+		ubyte[] imageBuffer;
+			if(_imageData) imageBuffer = _imageData.raw;
+		void compressRLE(){		//Help!!! I haven't used templates for this and I can't debug!!!
 			static if(!ignoreScanlineBounds){
 				const uint maxScanlineLength = header.width;
 				scanlineTable.length = 0;
@@ -390,8 +521,8 @@ public class TGA : Image, ImageMetadata{
 				uint currScanlineLength;
 			switch(header.pixelDepth){
 				case 16:
-					ushort* src = cast(ushort*)(cast(void*)imageData.ptr);
-					const ushort* dest = src + (imageData.length / 2);
+					ushort* src = cast(ushort*)(cast(void*)imageBuffer.ptr);
+					const ushort* dest = src + (imageBuffer.length / 2);
 					writeBuff.length = 257;
 					ushort* writeBuff0 = cast(ushort*)(cast(void*)writeBuff.ptr + 1);
 					while(src < dest){
@@ -460,13 +591,13 @@ public class TGA : Image, ImageMetadata{
 					}
 					break;
 				case 24:
-					Pixel24Bit* src = cast(Pixel24Bit*)(cast(void*)imageData.ptr);
-					const Pixel24Bit* dest = src + (imageData.length / 3);
+					RGB888* src = cast(RGB888*)(cast(void*)imageBuffer.ptr);
+					const RGB888* dest = src + (imageBuffer.length / 3);
 					writeBuff.length = 1;
-					Pixel24Bit[] writeBuff0;
+					RGB888[] writeBuff0;
 					writeBuff0.length = 128;
 					while(src < dest){
-						Pixel24Bit* currBlockBegin = src, currBlockEnd = src;
+						RGB888* currBlockBegin = src, currBlockEnd = src;
 						if(currBlockBegin[0] == currBlockBegin[1]){	//RLE block
 							ubyte blockLength;
 							//while(src < dest && currBlockEnd[0] == currBlockEnd[1]){
@@ -532,8 +663,8 @@ public class TGA : Image, ImageMetadata{
 					}
 					break;
 				case 32:
-					uint* src = cast(uint*)(cast(void*)imageData.ptr);
-					const uint* dest = src + (imageData.length / 4);
+					uint* src = cast(uint*)(cast(void*)imageBuffer.ptr);
+					const uint* dest = src + (imageBuffer.length / 4);
 					writeBuff.length = 1;
 					uint[] writeBuff0;
 					writeBuff0.length = 128;
@@ -604,8 +735,8 @@ public class TGA : Image, ImageMetadata{
 					}
 					break;
 				default:
-					ubyte* src = imageData.ptr;
-					const ubyte* dest = src + imageData.length;
+					ubyte* src = imageBuffer.ptr;
+					const ubyte* dest = src + imageBuffer.length;
 					writeBuff.length = 129;
 					while(src < dest){
 						ubyte* currBlockBegin = src, currBlockEnd = src;
@@ -630,7 +761,7 @@ public class TGA : Image, ImageMetadata{
 							version(unittest){
 								import std.conv : to;
 								pixelCount += blockLength;
-								assert(pixelCount <= imageData.length, "Required size: " ~ to!string(imageData.length) 
+								assert(pixelCount <= imageBuffer.length, "Required size: " ~ to!string(imageBuffer.length) 
 										~ " Current size:" ~ to!string(pixelCount));
 							}
 							blockLength--;
@@ -662,7 +793,7 @@ public class TGA : Image, ImageMetadata{
 							version(unittest){
 								import std.conv : to;
 								pixelCount += blockLength;
-								assert(pixelCount <= imageData.length, "Required size: " ~ to!string(imageData.length) 
+								assert(pixelCount <= imageBuffer.length, "Required size: " ~ to!string(imageBuffer.length) 
 										~ " Current size:" ~ to!string(pixelCount));
 							}
 							blockLength--;
@@ -681,11 +812,11 @@ public class TGA : Image, ImageMetadata{
 		//write most of the data into the file
 		file.rawWrite([header]);
 		file.rawWrite(imageID);
-		file.rawWrite(paletteData);
+		if (_palette) file.rawWrite(_palette.raw);
 		if(header.imageType >= Header.ImageType.RLEMapped && header.imageType <= Header.ImageType.RLEGrayscale){
 			compressRLE();
 		}else{
-			file.rawWrite(imageData);
+			file.rawWrite(_imageData.raw);
 		}
 		static if(saveDevArea){
 			if(developerAreaTags.length){
@@ -748,79 +879,6 @@ public class TGA : Image, ImageMetadata{
 			file.rawWrite([footer]);
 		}
 	}
-	/**
-	 * Sets up all the function pointers automatically.
-	 */
-	protected void setupDelegates() @safe pure {
-		void _createBitArray() @trusted pure {
-			bitArray = BitArray(reinterpretCast!void(imageData), pitch * header.width);
-		}
-		switch(header.pixelDepth){
-			case 1:
-				indexReader8Bit = &_readIndex_1bit;
-				indexWriter8Bit = &_writeIndex_1bit;
-				indexReader16bit = &_indexReadUpconv;
-				pitch = width + (header.width % 8 ? 8 - header.width % 8 : 0);
-				_createBitArray;
-				pixelReader = &_readAndLookup;
-				break;
-			case 2:
-				indexReader8Bit = &_readIndex_2bit;
-				indexWriter8Bit = &_writeIndex_2bit;
-				indexReader16bit = &_indexReadUpconv;
-				pixelReader = &_readAndLookup;
-				break;
-			case 4:
-				indexReader8Bit = &_readIndex_4bit;
-				indexWriter8Bit = &_writeIndex_4bit;
-				indexReader16bit = &_indexReadUpconv;
-				pixelReader = &_readAndLookup;
-				break;
-			case 8:
-				if (header.colorMapDepth) {
-					indexReader8Bit = &_readPixel_8bit;
-					indexWriter8Bit = &_writePixel!(ubyte);
-					indexReader16bit = &_indexReadUpconv;
-					pixelReader = &_readAndLookup;
-				} else {
-					pixelReader = &_readPixelAndUpconv!(ubyte);
-				}
-				break;
-			case 16:
-				if (header.colorMapDepth) {
-					indexWriter16bit = &_writePixel!(ushort);
-					indexReader16bit = &_readPixel_16bit;
-					pixelReader = &_readAndLookup;
-				} else {
-					pixelReader = &_readPixelAndUpconv!(PixelRGBA5551);
-				}
-				break;
-			case 24:
-				pixelReader = &_readPixelAndUpconv!(Pixel24Bit);
-				break;
-			case 32:
-				pixelReader = &_readPixel!(Pixel32Bit);
-				break;
-			default:
-				break;
-		}
-		switch (header.colorMapDepth) {
-			case 8:
-				paletteReader = &_paletteReader!ubyte;
-				break;
-			case 16:
-				paletteReader = &_paletteReader!PixelRGBA5551;
-				break;
-			case 24:
-				paletteReader = &_paletteReader!Pixel24Bit;
-				break;
-			case 32:
-				paletteReader = &_paletteReader!Pixel32Bit;
-				break;
-			default:
-				break;
-		}
-	}
 	override uint width() @nogc @safe @property const pure{
 		return header.width;
 	}
@@ -833,15 +891,27 @@ public class TGA : Image, ImageMetadata{
 	override ubyte getBitdepth() @nogc @safe @property const pure{
 		return header.pixelDepth;
 	}
-	override ubyte getPaletteBitdepth() @nogc @safe @property const pure{
+	override ubyte getPaletteBitdepth() @nogc @safe @property const pure {
 		return header.colorMapDepth;
 	}
-	override uint getPixelFormat() @nogc @safe @property const pure{
-		if(!Header.ColorMapType.NoColorMapPresent){
-			return PixelFormat.Undefined;
-		}else{
+	override uint getPixelFormat() @nogc @safe @property const pure {
+		if (header.imageType == Header.ImageType.UncompressedMapped || header.imageType == Header.ImageType.RLEMapped || 
+				header.imageType == Header.ImageType.RLE4BitMapped || header.imageType == Header.ImageType.RLE1BitMapped) {
+			switch (header.pixelDepth) {
+				case 1: return PixelFormat.Indexed1Bit;
+				case 2: return PixelFormat.Indexed2Bit;
+				case 4: return PixelFormat.Indexed4Bit;
+				case 8: return PixelFormat.Indexed8Bit;
+				case 16: return PixelFormat.Indexed16Bit;
+				default: return PixelFormat.Undefined;
+			}
+		} else if (header.imageType == Header.ImageType.RLEGrayscale || 
+				header.imageType == Header.ImageType.UncompressedGrayscale) {
+			if (header.pixelDepth == 8) return PixelFormat.Grayscale8Bit;
+			else return PixelFormat.Undefined;
+		} else {		//Must be truecolor
 			switch(header.pixelDepth){
-				case 16:
+				case 15, 16:
 					return PixelFormat.RGBA5551;
 				case 24:
 					return PixelFormat.RGB888;
@@ -857,14 +927,11 @@ public class TGA : Image, ImageMetadata{
 			return PixelFormat.Undefined;
 		}else{
 			switch(header.colorMapDepth){
-				case 16:
-					return PixelFormat.RGBA5551;
-				case 24:
-					return PixelFormat.RGB888;
-				case 32:
-					return PixelFormat.ARGB8888;
-				default:
-					return PixelFormat.Undefined;
+				case 8: return PixelFormat.Grayscale8Bit;
+				case 15, 16: return PixelFormat.RGBA5551;
+				case 24: return PixelFormat.RGB888;
+				case 32: return PixelFormat.ARGB8888;
+				default: return PixelFormat.Undefined;
 			}
 		}
 	}
@@ -1031,23 +1098,6 @@ public class TGA : Image, ImageMetadata{
 unittest{
 	import std.conv : to;
 	import vfile;
-	/+void compareImages(Image a, Image b){
-		assert(a.width == b.width);
-		assert(a.height == b.height);
-		//Check if the data in the two are identical
-		for (ushort y ; y < a.height ; y++) {
-			for (ushort x ; x < a.width ; x++) {
-				assert(a.readPixel(x,y) == b.readPixel(x,y), "Error at position (" ~ to!string(x) ~ "," ~ to!string(y) ~ ")!");
-			}
-		}
-		if (a.isIndexed && b.isIndexed) {
-			auto aPal = a.palette;
-			auto bPal = b.palette;
-			for (ushort i ; i < aPal.length ; i++) {
-				assert(aPal[i] == bPal[i], "Error at position " ~ to!string(i) ~ "!");
-			}
-		}
-	}+/
 	assert(TGA.Header.sizeof == 18);
 	//void[] tempStream;
 	//test 8 bit RLE load for 8 bit greyscale and indexed
@@ -1074,30 +1124,34 @@ unittest{
 		compareImages(greyscaleUnc, greyscaleRLE);
 	}
 	{
-		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/mapped_8.tga");
-		std.stdio.writeln("Loading ", greyscaleUncFile.name);
-		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
-		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
-		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/mapped_8_rle.tga");
-		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
-		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
-		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
-		compareImages(greyscaleUnc, greyscaleRLE);
+		std.stdio.File mappedUncFile = std.stdio.File("test/tga/mapped_8.tga");
+		std.stdio.writeln("Loading ", mappedUncFile.name);
+		TGA mappedUnc = TGA.load(mappedUncFile);
+		std.stdio.writeln("File `", mappedUncFile.name, "` successfully loaded");
+		std.stdio.File mappedRLEFile = std.stdio.File("test/tga/mapped_8_rle.tga");
+		std.stdio.writeln("Loading ", mappedRLEFile.name);
+		TGA mappedRLE = TGA.load(mappedRLEFile);
+		std.stdio.writeln("File `", mappedRLEFile.name, "` successfully loaded");
+		compareImages(mappedUnc, mappedRLE);
 		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLEMapped;
+		mappedUnc.getHeader.imageType = TGA.Header.ImageType.RLEMapped;
 		VFile virtualFile;// = VFile(tempStream);
 		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
-		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		mappedUnc.save!(VFile, false, false, true)(virtualFile);
 		std.stdio.writeln("Save to virtual file was successful");
 		std.stdio.writeln(virtualFile.size);
 		virtualFile.seek(0);
-		greyscaleRLE = TGA.load!VFile(virtualFile);
+		mappedRLE = TGA.load!VFile(virtualFile);
 		std.stdio.writeln("Load from virtual file was successful");
-		compareImages(greyscaleUnc, greyscaleRLE);
-		//std.stdio.writeln(greyscaleUnc.palette);
-		/+foreach (c ; greyscaleUnc.palette) {
-			std.stdio.writeln();
-		}+/
+		compareImages(mappedUnc, mappedRLE);
+		{
+			Palette!RGBA5551 p = cast(Palette!RGBA5551)mappedUnc.palette;
+			//std.stdio.writeln(mappedUnc.getHeader);
+			foreach_reverse (c ; p) {
+			}
+			foreach (c ; p) {
+			}
+		}
 	}
 	{
 		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/concreteGUIE3.tga");
@@ -1142,6 +1196,12 @@ unittest{
 		greyscaleRLE = TGA.load!VFile(virtualFile);
 		std.stdio.writeln("Load from virtual file was successful");
 		compareImages(greyscaleUnc, greyscaleRLE);
+		//Test upconversion and handling of 16 bit images
+		ImageData!RGBA5551 imageData = cast(ImageData!RGBA5551)greyscaleUnc.imageData;
+		TGA upconvToRGB888 = new TGA(imageData.convTo(PixelFormat.RGB888), null, null, true);
+		
+		std.stdio.File output = std.stdio.File("test/tga/test.tga", "wb");
+		upconvToRGB888.save(output);
 	}
 	{
 		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/truecolor_24.tga");

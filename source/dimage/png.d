@@ -24,6 +24,24 @@ import std.conv : to;
  * Implements the Portable Network Graphics file format as a class.
  */
 public class PNG : Image{
+	///Chunk initializer IDs.
+	static enum ChunkInitializers : char[4] {
+		Header				=	"IHDR",		///Standard, for header, before image data
+		Palette				=	"PLTE",		///Standard, for palette, after header and before image data
+		Data				=	"IDAT",		///Standard, for image data
+		End					=	"IEND",		///Standard, file end marker
+		//Ancillary chunks:
+		Background			=	"bKGD",		///Background color
+		Chromaticies		=	"cHRM",		///Primary chromaticities and white point
+		Gamma				=	"gAMA",		///Image gamma
+		Histogram			=	"hIST",		///Image histogram
+		PixDim				=	"pHYs",		///Physical pixel dimensions
+		SignifBits			=	"sBIT",		///Significant bits
+		TextData			=	"tEXt",		///Textual data
+		Time				=	"tIME",		///Last modification date
+		Transparency		=	"tRNS",		///Transparency
+		CompTextData		=	"zTXt",		///Compressed textual data
+	}
 	static enum HEADER_INIT = "IHDR";		///Initializes header in the file
 	static enum PALETTE_INIT = "PLTE";		///Initializes palette in the file
 	static enum DATA_INIT = "IDAT";			///Initializes image data in the file
@@ -145,15 +163,29 @@ public class PNG : Image{
 	public EmbeddedData[]	ancillaryChunks;		///Stores ancilliary chunks that are not essential for image processing
 	protected ubyte[]		filterBytes;			///Filterbytes for each scanline
 	protected size_t pitch;
-	mixin ChunkyAccess4Bit;
-	mixin ChunkyAccess2Bit;
-	mixin MonochromeAccess;
 	/**
 	 * Creates an empty PNG file in memory
 	 */
-	public this(int width, int height, ubyte bitDepth, ColorType colorType, ubyte compression, ubyte[] imageData, 
-			ubyte[] paletteData = []){
-		header = Header(width, height, bitDepth, colorType, compression, 0, 0);
+	public this(IImageData imgDat, IPalette pal) @safe pure {
+		//header = Header(width, height, bitDepth, colorType, compression, 0, 0);
+		_imageData = imgDat;
+		_palette = pal;
+		switch(imgDat.pixelFormat) {
+			case PixelFormat.Indexed1Bit: .. case PixelFormat.Indexed8Bit:
+				header.colorType = ColorType.Indexed;
+				break;
+			case PixelFormat.YA88 | PixelFormat.BigEndian:
+				header.colorType = ColorType.GreyscaleWithAlpha;
+				break;
+			case PixelFormat.RGB888 | PixelFormat.BigEndian, PixelFormat.RGBX5551 | PixelFormat.BigEndian:
+				header.colorType = ColorType.TrueColor;
+				break;
+			case PixelFormat.RGBA8888 | PixelFormat.BigEndian:
+				header.colorType = ColorType.TrueColorWithAlpha;
+				break;
+			default: throw new ImageFormatException("Image format currently not supported!");
+		}
+		header.bitDepth = imgDat.bitDepth;
 	}
 	protected this(){
 
@@ -179,12 +211,12 @@ public class PNG : Image{
 		if(ret != zlib.Z_OK)
 			throw new Exception("Decompressor initialization error");
 
-		ubyte[] readBuffer, imageBuffer;
+		ubyte[] readBuffer, imageBuffer, imageTemp, paletteTemp;
 		readBuffer.length = 8;
 		file.rawRead(readBuffer);
 		for(int i ; i < 8 ; i++)
 			if(readBuffer[i] != PNG_SIGNATURE[i])
-				throw new ImageFormatException("Invalid PNG file signature");
+				throw new ImageFileException("Invalid PNG file signature");
 		do{
 			ubyte[4] crc;
 			file.rawRead(readBuffer);
@@ -202,13 +234,13 @@ public class PNG : Image{
 					result.pitch = (result.header.width * result.getBitdepth) / 8;
 					version (unittest) std.stdio.writeln("Pitch length: ", result.pitch);
 					imageBuffer.length = result.pitch + 1;
-					version (unittest) std.stdio.writeln(imageBuffer.length);
+					version (unittest) std.stdio.writeln(result.getPixelFormat);
 					strm.next_out = imageBuffer.ptr;
 					strm.avail_out = cast(uint)imageBuffer.length;
 					//result.pitch = result.header.width;
 					break;
 				case PALETTE_INIT:
-					result.paletteData = readBuffer.dup;
+					paletteTemp = readBuffer.dup;
 					pos = EmbeddedData.DataPosition.BeforeIDAT;
 					break;
 				case DATA_INIT:
@@ -224,14 +256,14 @@ public class PNG : Image{
 						if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
 							version(unittest) std.stdio.writeln(ret);
 							zlib.inflateEnd(&strm);
-							throw new Exception("Decompression error");
+							throw new ImageFileException("Decompression error");
 						}else if(imageBuffer.length == strm.total_out){
 							pos = EmbeddedData.DataPosition.AfterIDAT;
 						}
 						if (!strm.avail_out) {//flush scanline into imagedata
 							version (unittest) scanlineCounter++;
 							version (unittest) assert (scanlineCounter <= result.header.height, "Scanline overflow!");
-							result.imageData ~= imageBuffer[1..$];
+							imageTemp ~= imageBuffer[1..$];
 							result.filterBytes ~= imageBuffer[0];
 							strm.next_out = imageBuffer.ptr;
 							strm.avail_out = cast(uint)imageBuffer.length;
@@ -241,13 +273,13 @@ public class PNG : Image{
 					break;
 				case END_INIT:
 					version (unittest) assert(result.header.height == scanlineCounter, "Scanline count mismatch");
-					if(result.imageData.length + result.filterBytes.length > strm.total_out){
+					if(imageTemp.length + result.filterBytes.length > strm.total_out){
 						zlib.inflateEnd(&strm);
 						//version(unittest) std.stdio.writeln()
 						throw new Exception("Decompression error! Image ended at: " ~ to!string(strm.total_out) ~ 
-						"; Required length: " ~ to!string(result.imageData.length));
+						"; Required length: " ~ to!string(imageTemp.length));
 					}
-					result.imageData.reserve(result.height * result.pitch);
+					imageTemp.reserve(result.height * result.pitch);
 					result.filterBytes.reserve(result.height);
 					iend = true;
 					break;
@@ -260,6 +292,9 @@ public class PNG : Image{
 						std.stdio.writeln ("ID: " , curChunk.identifier, " size: ", readBuffer.length, " pos: ", pos);
 					}
 					break;
+			}
+			if(paletteTemp) {
+				result._palette = new Palette!RGB888BE(reinterpretCast!RGB888BE(paletteTemp), PixelFormat.RGB888, 24);
 			}
 			//calculate crc
 			//if(curChunk.dataLength){
@@ -280,79 +315,62 @@ public class PNG : Image{
 		} while(!iend);
 		zlib.inflateEnd(&strm);//should have no data remaining
 		/+for (int line ; line < result.height ; line++) {
-			result.imageData ~= imageBuffer[0..result.pitch];
+			imageTemp ~= imageBuffer[0..result.pitch];
 			result.filterBytes ~= imageBuffer[result.pitch];
 			if (imageBuffer.length)
 				imageBuffer = imageBuffer[result.pitch + 1..$];
 		}+/
-		assert(result.imageData.length == result.pitch * result.header.height, "Image size mismatch. Expected size: " ~ 
-				to!string(result.pitch * result.header.height) ~ "; Actual size: " ~ to!string(result.imageData.length) ~ 
+		assert(imageTemp.length == result.pitch * result.header.height, "Image size mismatch. Expected size: " ~ 
+				to!string(result.pitch * result.header.height) ~ "; Actual size: " ~ to!string(imageTemp.length) ~ 
 				"; Pitch length: " ~ to!string(result.pitch) ~ "; N of scanlines: " ~ to!string(result.header.height));
-		result.setupDelegates();
+		//setup imagedata
+		switch (result.getPixelFormat & ~PixelFormat.BigEndian) {
+			case PixelFormat.Indexed1Bit: 
+				result._imageData = new IndexedImageData1Bit(imageTemp, result._palette, result.width, result.height);
+				break;
+			case PixelFormat.Indexed2Bit:
+				result._imageData = new IndexedImageData2Bit(imageTemp, result._palette, result.width, result.height);
+				break;
+			case PixelFormat.Indexed4Bit:
+				result._imageData = new IndexedImageData4Bit(imageTemp, result._palette, result.width, result.height);
+				break;
+			case PixelFormat.Indexed8Bit:
+				result._imageData = new IndexedImageData!ubyte(imageTemp, result._palette, result.width, result.height);
+				break;
+			case PixelFormat.YA88:
+				result._imageData = new ImageData!YA88BE(reinterpretCast!YA88BE(imageTemp), result.width, result.height, 
+						result.getPixelFormat, result.getBitdepth);
+				break;
+			case PixelFormat.RGB888:
+				result._imageData = new ImageData!RGB888BE(reinterpretCast!RGB888BE(imageTemp), result.width, result.height, 
+						result.getPixelFormat, result.getBitdepth);
+				break;
+			case PixelFormat.RGBX5551:
+				result._imageData = new ImageData!RGBA5551(reinterpretCast!RGBA5551(imageTemp), result.width, result.height, 
+						result.getPixelFormat, result.getBitdepth);
+				break;
+			case PixelFormat.RGBA8888:
+				result._imageData = new ImageData!RGBA8888BE(reinterpretCast!RGBA8888BE(imageTemp), result.width, result.height, 
+						result.getPixelFormat, result.getBitdepth);
+				break;
+			case PixelFormat.Grayscale8Bit:
+				result._imageData = new ImageData!ubyte(reinterpretCast!ubyte(imageTemp), result.width, result.height, 
+						result.getPixelFormat, result.getBitdepth);
+				break;
+			default: throw new ImageFileException("Unsupported image format!");
+		}
 		return result;
 	}
-	/**
-	 * Sets up all the function pointers automatically.
-	 */
-	protected void setupDelegates() @safe pure {
-		if (header.colorType == ColorType.Greyscale || header.colorType == ColorType.Indexed) {
-			switch (header.bitDepth) {
-				case 1:
-					indexReader8Bit = &_readIndex_1bit;
-					indexWriter8Bit = &_writeIndex_1bit;
-					indexReader16bit = &_indexReadUpconv;
-					pixelReader = &_readAndLookup;
-					break;
-				case 2:
-					indexReader8Bit = &_readIndex_2bit;
-					indexWriter8Bit = &_writeIndex_2bit;
-					indexReader16bit = &_indexReadUpconv;
-					pixelReader = &_readAndLookup;
-					break;
-				case 4:
-					indexReader8Bit = &_readIndex_4bit;
-					indexWriter8Bit = &_writeIndex_4bit;
-					indexReader16bit = &_indexReadUpconv;
-					pixelReader = &_readAndLookup;
-					break;
-				case 8:
-					if (header.colorType == ColorType.Greyscale) {
-						pixelReader = &_readPixelAndUpconv!(ubyte);
-					} else {
-						indexReader8Bit = &_readPixel_8bit;
-						indexWriter8Bit = &_writePixel!(ubyte);
-						indexReader16bit = &_indexReadUpconv;
-						pixelReader = &_readAndLookup;
-					}
-					break;
-				default:
-					break;
-			}
-			if (header.colorType == ColorType.Indexed) {
-				paletteReader = &_paletteReader!Pixel24BitBE;
-			}
-		} else {
-			switch (getPixelFormat()){
-				case PixelFormat.RGBA8888:
-					pixelReader = &_readPixelAndUpconv!(Pixel32BitRGBABE);
-					break;
-				case PixelFormat.RGB888:
-					pixelReader = &_readPixelAndUpconv!(Pixel24BitBE);
-					break;
-				case PixelFormat.YA88:
-					pixelReader = &_readPixelAndUpconv!(PixelYA88);
-					break;
-				default:
-					break;
-			}
-		}
-	}
+	
 	/**
 	 * Saves the file to the disk.
 	 * Currently interlaced mode is unsupported.
 	 */
-	public void save(F = std.stdio.File)(ref F file, int compLevel = 6){
+	public void save(F = std.stdio.File)(ref F file, int compLevel = 6) {
 		ubyte[] crc;
+		ubyte[] paletteData;
+		if (_palette) paletteData = _palette.raw;
+		ubyte[] imageTemp = _imageData.raw;
 		//write PNG signature into file
 		file.rawWrite(PNG_SIGNATURE);
 		//write Header into file
@@ -398,18 +416,18 @@ public class PNG : Image{
 		{	
 			int ret;
 			ubyte[] input, output;
-			input.reserve(imageData.length + filterBytes.length);
+			input.reserve(imageTemp.length + filterBytes.length);
 			for (int line ; line < height ; line++){
 				const size_t offset = line * pitch;
 				input ~= filterBytes[line];
-				input ~= imageData[offset..offset+pitch];
+				input ~= imageTemp[offset..offset+pitch];
 			}
     		
     		zlib.z_stream strm;
 			ret = zlib.deflateInit(&strm, compLevel);
 			if (ret != zlib.Z_OK)
 				throw new Exception("Compressor initialization error");	
-			output.length = 32 * 1024;//cast(uint)imageData.length;
+			output.length = 32 * 1024;//cast(uint)imageTemp.length;
 			strm.next_in = input.ptr;
 			strm.avail_in = cast(uint)input.length;
 			strm.next_out = output.ptr;
@@ -496,14 +514,20 @@ public class PNG : Image{
 	}
 	override uint getPixelFormat() @nogc @safe @property const pure{
 		switch(header.colorType){
-			case ColorType.GreyscaleWithAlpha:
-				return PixelFormat.YA88;
+			case ColorType.Indexed:
+				switch(header.bitDepth) {
+					case 1: return PixelFormat.Indexed1Bit;
+					case 2: return PixelFormat.Indexed2Bit;
+					case 4: return PixelFormat.Indexed4Bit;
+					case 8: return PixelFormat.Indexed8Bit;
+					default: return PixelFormat.Undefined;
+				}
+			case ColorType.GreyscaleWithAlpha: return PixelFormat.YA88 | PixelFormat.BigEndian;
+			case ColorType.Greyscale: return PixelFormat.Grayscale8Bit;
 			case ColorType.TrueColor:
-				return header.bitDepth == 8 ? PixelFormat.RGB888 : PixelFormat.RGBX5551;
-			case ColorType.TrueColorWithAlpha:
-				return PixelFormat.RGBA8888;
-			default:
-				return PixelFormat.Undefined;
+				return header.bitDepth == 8 ? PixelFormat.RGB888 | PixelFormat.BigEndian : PixelFormat.RGBX5551;
+			case ColorType.TrueColorWithAlpha: return PixelFormat.RGBA8888 | PixelFormat.BigEndian;
+			default: return PixelFormat.Undefined;
 		}
 	}
 	override uint getPalettePixelFormat() @nogc @safe @property const pure{
@@ -573,7 +597,7 @@ unittest{
 		std.stdio.writeln("The two images' output match");
 	}
 	//test against TGA versions of the same images
-	{
+	/+{
 		std.stdio.File tgaSource = std.stdio.File("./test/tga/mapped_8.tga");
 		std.stdio.File pngSource = std.stdio.File("./test/png/mapped_8.png");
 		std.stdio.writeln("Loading ", tgaSource.name);
@@ -599,5 +623,5 @@ unittest{
 		std.stdio.writeln("Loading ", pngSource.name);
 		PNG pngImage = PNG.load(pngSource);
 		compareImages!true(tgaImage, pngImage);
-	}
+	}+/
 }

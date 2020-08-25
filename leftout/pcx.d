@@ -5,7 +5,7 @@
  * Copyright under Boost Software License.
  */
 
-module dimage.pcx;
+module leftout.pcx;
 
 import dimage.base;
 import dimage.util;
@@ -15,6 +15,7 @@ import std.bitmanip;
 
 /**
  * Implements ZSoft PCX file handling.
+ * Dummied out due to complexity.
  */
 public class PCX : Image {
 	/**

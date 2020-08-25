@@ -130,9 +130,7 @@ public class BMP : Image {
 		WinNTBitmapHeaderExt	shortext;
 	}
 	protected HeaderExt headerExt;
-	protected size_t pitch;
-	mixin ChunkyAccess4Bit;
-	mixin MonochromeAccess;
+	//protected size_t pitch;
 	/**
 	 * Creates a blank for loading.
 	 */
@@ -142,17 +140,95 @@ public class BMP : Image {
 	/**
 	 * Creates a new bitmap from supplied data.
 	 */
-	public this (int width, int height, ubyte bitDepth, PixelFormat format, ) {
-		
+	public this (IImageData imgDat, IPalette pal = null, BMPVersion vers = BMPVersion.Win4X) @safe pure {
+		if (vers == BMPVersion.Win2X) {
+			if (pal) {
+				if (pal.paletteFormat != PixelFormat.RGB888) throw new ImageFormatException("Unsupported palette format!");
+				if (!(imgDat.pixelFormat == PixelFormat.Indexed1Bit || imgDat.pixelFormat == PixelFormat.Indexed4Bit || 
+						imgDat.pixelFormat == PixelFormat.Indexed8Bit)) throw new ImageFormatException("Image format not supported by this
+						version of BMP!");
+				bitmapHeaderLength = vers;
+				_imageData = imgDat;
+				_palette = pal;
+				bitmapHeader.oldType.width = cast(short)_imageData.width;
+				bitmapHeader.oldType.height = cast(short)_imageData.height;
+				bitmapHeader.oldType.planes = 1;
+				bitmapHeader.oldType.bitsPerPixel = _imageData.bitDepth;
+				header.newType.bitmapOffset = cast(uint)pal.raw.length;
+			} else throw new ImageFormatException("This version of BMP must have a palette!");
+		} else if (vers == BMPVersion.Win1X) {
+			if (pal) throw new ImageFormatException("This version of BMP doesn't have a palette!");
+			_imageData = imgDat;
+			header.oldType.width = cast(ushort)_imageData.width;
+			header.oldType.height = cast(ushort)_imageData.height;
+			header.oldType.byteWidth = cast(ushort)(_imageData.width * 8 / _imageData.bitDepth);
+			if (_imageData.bitDepth == 4 && _imageData.width & 1) header.oldType.byteWidth++;
+			if (_imageData.bitDepth == 1 && _imageData.width & 7) header.oldType.byteWidth++;
+			header.oldType.bitsPerPixel = _imageData.bitDepth;
+			header.oldType.planes = 1;
+		} else {
+			if (pal) {
+				if (pal.paletteFormat != PixelFormat.XRGB8888) throw new ImageFormatException("Unsupported palette format!");
+				if (!(imgDat.pixelFormat == PixelFormat.Indexed1Bit || imgDat.pixelFormat == PixelFormat.Indexed4Bit || 
+						imgDat.pixelFormat == PixelFormat.Indexed8Bit)) throw new ImageFormatException("Unsupported indexed image type!");
+				_palette = pal;
+				header.newType.bitmapOffset = cast(uint)pal.raw.length;
+			} else {
+				if (!(imgDat.pixelFormat == PixelFormat.RGB888 || imgDat.pixelFormat == PixelFormat.ARGB8888 || 
+						imgDat.pixelFormat == PixelFormat.RGB565 || imgDat.pixelFormat == PixelFormat.RGBA5551)) throw new 
+						ImageFormatException("Unsupported truecolor image type!");
+			}
+			_imageData = imgDat;
+			bitmapHeaderLength = vers;
+			bitmapHeader.newType.planes = 1;
+			bitmapHeader.newType.compression = 0;
+			bitmapHeader.newType.bitsPerPixel = _imageData.bitDepth;
+			bitmapHeader.newType.width = _imageData.width;
+			bitmapHeader.newType.height = _imageData.height;
+			bitmapHeader.newType.horizResolution = 72;
+			bitmapHeader.newType.vertResolution = 72;
+			bitmapHeader.newType.colorsUsed = 1 << bitmapHeader.newType.bitsPerPixel;
+			bitmapHeader.newType.colorsimportant = bitmapHeader.newType.colorsUsed; //ALL THE COLORS!!! :)
+			if (vers == BMPVersion.Win4X || vers == BMPVersion.WinNT) {
+				switch(_imageData.pixelFormat) {
+					case PixelFormat.RGB565:
+						headerExt.longext.redMask = 0xF8_00_00_00;
+						headerExt.longext.greenMask = 0x07_E0_00_00;
+						headerExt.longext.blueMask = 0x00_1F_00_00;
+						break;
+					case PixelFormat.RGBX5551:
+						headerExt.longext.redMask = 0xF8_00_00_00;
+						headerExt.longext.greenMask = 0x07_C0_00_00;
+						headerExt.longext.blueMask = 0x00_3E_00_00;
+						break;
+					case PixelFormat.RGB888:
+						headerExt.longext.redMask = 0xff_00_00_00;
+						headerExt.longext.greenMask = 0x00_ff_00_00;
+						headerExt.longext.blueMask = 0x00_00_ff_00;
+						break;
+					case PixelFormat.ARGB8888:
+						headerExt.longext.alphaMask = 0xff_00_00_00;
+						headerExt.longext.redMask = 0x00_ff_00_00;
+						headerExt.longext.greenMask = 0x00_00_ff_00;
+						headerExt.longext.blueMask = 0x00_00_00_ff;
+						break;
+					default: break;
+				}
+			}
+		}
+		if (vers != BMPVersion.Win1X) {
+			header.newType.bitmapOffset += 2 + WinBMPHeader.sizeof + bitmapHeaderLength;
+			header.newType.fileSize = header.newType.bitmapOffset + cast(uint)_imageData.raw.length;
+		}
 	}
 	/**
 	 * Loads an image from a file.
 	 * Only uncompressed and 8bit RLE are supported.
 	 */
-	public static BMP load (F = std.stdio.file) (F file) {
+	public static BMP load (F = std.stdio.file) (ref F file) {
 		import std.math : abs;
 		BMP result = new BMP();
-		ubyte[] buffer;
+		ubyte[] buffer, imageBuffer;
 		void loadUncompressedImageData (int bitsPerPixel, size_t width, size_t height) {
 			size_t scanlineSize = (width * bitsPerPixel) / 8;
 			scanlineSize += ((width * bitsPerPixel) % 32) / 8;	//Padding
@@ -161,11 +237,11 @@ public class BMP : Image {
 			for(int i ; i < height ; i++) {
 				file.rawRead(localBuffer);
 				assert(localBuffer.length == scanlineSize, "Scanline mismatch");
-				result.imageData ~= localBuffer[0..(width * bitsPerPixel) / 8];
+				imageBuffer ~= localBuffer[0..(width * bitsPerPixel) / 8];
 			}
-			assert(result.imageData.length == (width * height) / 8, "Scanline mismatch");
+			//assert(imageBuffer.length == (width * height) / 8, "Scanline mismatch");
 			if (result.bitmapHeaderLength >> 16)
-				assert(result.imageData.length == result.bitmapHeader.newType.sizeOfBitmap, "Size mismatch");
+				assert(imageBuffer.length == result.bitmapHeader.newType.sizeOfBitmap, "Size mismatch");
 		}
 		void load8BitRLEImageData (size_t width, size_t height) {
 			size_t remaining = width * height;
@@ -173,7 +249,7 @@ public class BMP : Image {
 			ubyte[] scanlineBuffer;
 			localBuffer.length = 2;
 			scanlineBuffer.reserve(width);
-			result.imageData.reserve(width * height);
+			imageBuffer.reserve(width * height);
 			while (remaining) {
 				localBuffer = file.rawRead(localBuffer);
 				assert(localBuffer.length == 2, "End of File error");
@@ -185,7 +261,7 @@ public class BMP : Image {
 				} else if (localBuffer[1] == 1) {	//End of bitmap data marker
 					//flush current scanline
 					scanlineBuffer.length = width;
-					result.imageData ~= scanlineBuffer;
+					imageBuffer ~= scanlineBuffer;
 					break;
 				} else if (localBuffer[1] == 2) {	//Run offset marker
 					localBuffer = file.rawRead(localBuffer);
@@ -193,10 +269,10 @@ public class BMP : Image {
 					remaining -= localBuffer[0] + (localBuffer[1] * width);
 					//flush current scanline
 					scanlineBuffer.length = width;
-					result.imageData ~= scanlineBuffer;
+					imageBuffer ~= scanlineBuffer;
 					while (localBuffer[1]) {
 						localBuffer[1]--;
-						result.imageData ~= new ubyte[](width);
+						imageBuffer ~= new ubyte[](width);
 					}
 					//clear current scanline
 					scanlineBuffer.length = 0;
@@ -214,12 +290,12 @@ public class BMP : Image {
 					scanlineBuffer.length += width - (scanlineBuffer.length % width);
 					//flush current scanline
 					scanlineBuffer.length = width;
-					result.imageData ~= scanlineBuffer;
+					imageBuffer ~= scanlineBuffer;
 					//clear current scanline
 					scanlineBuffer.length = 0;
 				}
 			}
-			result.imageData.length = width * height;
+			imageBuffer.length = width * height;
 		}
 		void loadImageDataWin3x () {
 			switch (result.bitmapHeader.newType.compression) {
@@ -237,26 +313,32 @@ public class BMP : Image {
 			result.bitmapHeader.newType = reinterpretGet!Win3xBitmapHeader(buffer);
 		}
 		void loadPalette (int bitsPerPixel, int bytesPerPaletteEntry) {
+			ubyte[] paletteBuffer;
 			switch (bitsPerPixel) {
 				case 1:
-					result.paletteData.length = 2 * bytesPerPaletteEntry;
+					paletteBuffer.length = 2 * bytesPerPaletteEntry;
 					break;
 				case 4:
-					result.paletteData.length = 16 * bytesPerPaletteEntry;
+					paletteBuffer.length = 16 * bytesPerPaletteEntry;
 					break;
 				case 8:
-					result.paletteData.length = 256 * bytesPerPaletteEntry;
+					paletteBuffer.length = 256 * bytesPerPaletteEntry;
 					break;
 				default:
 					return;
 			}
-			result.paletteData = file.rawRead(result.paletteData);
+			paletteBuffer = file.rawRead(paletteBuffer);
+			if(bytesPerPaletteEntry == 3) {
+				result._palette = new Palette!RGB888(reinterpretCast!RGB888(paletteBuffer), PixelFormat.RGB888, 24);
+			} else {
+				result._palette = new Palette!ARGB8888(reinterpretCast!ARGB8888(paletteBuffer), PixelFormat.XRGB8888, 32);
+			}
 		}
 		buffer.length = 2;
 		buffer = file.rawRead(buffer);
 		result.fileVersionIndicator = reinterpretGet!ushort(buffer);
 		//Decide file version, if first two byte is "BM" it's 2.0 or later, if not it's 1.x
-		if (!result.fileVersionIndicator) {
+		if (result.fileVersionIndicator) {
 			buffer.length = WinBMPHeader.sizeof;
 			buffer = file.rawRead(buffer);
 			result.header.newType = reinterpretGet!WinBMPHeader(buffer);
@@ -313,40 +395,71 @@ public class BMP : Image {
 			loadUncompressedImageData(result.header.oldType.bitsPerPixel, result.header.oldType.width, 
 					result.header.oldType.height);
 		}
-		result.setupDelegates();
+		//Set up image data
+		//std.stdio.writeln(result.getPixelFormat);
+		switch (result.getPixelFormat) {
+			case PixelFormat.Indexed1Bit:
+				result._imageData = new IndexedImageData1Bit(imageBuffer, result._palette, result.width, result.height);
+				break;
+			case PixelFormat.Indexed4Bit:
+				result._imageData = new IndexedImageData4Bit(imageBuffer, result._palette, result.width, result.height);
+				break;
+			case PixelFormat.Indexed8Bit:
+				result._imageData = new IndexedImageData!ubyte(imageBuffer, result._palette, result.width, result.height);
+				break;
+			case PixelFormat.RGB565:
+				result._imageData = new ImageData!RGB565(reinterpretCast!RGB565(imageBuffer), result.width, result.height, 
+						PixelFormat.RGB565, 16);
+				break;
+			case PixelFormat.RGBX5551:
+				result._imageData = new ImageData!RGBA5551(reinterpretCast!RGBA5551(imageBuffer), result.width, result.height, 
+						PixelFormat.RGBA5551, 16);
+				break;
+			case PixelFormat.RGB888:
+				result._imageData = new ImageData!RGB888(reinterpretCast!RGB888(imageBuffer), result.width, result.height, 
+						PixelFormat.RGB888, 24);
+				break;
+			case PixelFormat.ARGB8888:
+				result._imageData = new ImageData!ARGB8888(reinterpretCast!ARGB8888(imageBuffer), result.width, result.height, 
+						PixelFormat.ARGB8888, 32);
+				break;
+			default: throw new ImageFileException("Unknown image format!");
+		}
 		return result;
 	}
 	///Saves the image into the given file.
 	///Only uncompressed bitmaps are supported currently.
-	public void save (F = std.stdio.file)(F file) {
-		ubyte[] buffer;
+	public void save (F = std.stdio.file)(ref F file) {
+		ubyte[] buffer, paletteData;
+		if (_palette) paletteData = _palette.raw;
 		void saveUncompressed () {
-			const size_t pitch = (width * bitDepth) / 8;
+			const size_t pitch = (width * getBitdepth) / 8;
+			ubyte[] imageBuffer = _imageData.raw;
 			for (int i ; i < height ; i++) {
-				buffer = imageData[pitch * i .. pitch * (i + 1)];
+				buffer = imageBuffer[pitch * i .. pitch * (i + 1)];
 				while (buffer.length & 0b0000_0011) 
 					buffer ~= 0b0;
 				file.rawWrite(buffer);
 			}
 		}
 		void saveWin3xHeader () {
-			buffer = reinterpretCast!ubyte([BMPTYPE]);
+			buffer = reinterpretAsArray!ubyte(BMPTYPE);
 				file.rawWrite(buffer);
-				buffer = reinterpretCast!ubyte([header.newType]);
+				buffer = reinterpretAsArray!ubyte(header.newType);
 				file.rawWrite(buffer);
-				buffer = reinterpretCast!ubyte([bitmapHeaderLength]);
-				buffer ~= reinterpretCast!ubyte([bitmapHeader.newType]);
+				buffer = reinterpretAsArray!ubyte(bitmapHeaderLength);
+				buffer ~= reinterpretAsArray!ubyte(bitmapHeader.newType);
 				file.rawWrite(buffer);
 		}
 		buffer.length = 2;
 		switch (bitmapHeaderLength) {
 			case BMPVersion.Win2X:
-				buffer = reinterpretCast!ubyte([BMPTYPE]);
+				buffer = reinterpretAsArray!ubyte(BMPTYPE);
 				file.rawWrite(buffer);
-				buffer = reinterpretCast!ubyte([header.newType]);
+				buffer = reinterpretAsArray!ubyte(header.newType);
 				file.rawWrite(buffer);
-				buffer = reinterpretCast!ubyte([bitmapHeaderLength]);
-				buffer ~= reinterpretCast!ubyte([bitmapHeader.oldType]);
+				buffer = reinterpretAsArray!ubyte(bitmapHeaderLength);
+				buffer ~= reinterpretAsArray!ubyte(bitmapHeader.oldType);
 				file.rawWrite(buffer);
 				if (paletteData.length)
 					file.rawWrite(paletteData);
@@ -360,7 +473,7 @@ public class BMP : Image {
 				break;
 			case BMPVersion.Win4X:
 				saveWin3xHeader();
-				buffer = reinterpretCast!ubyte([headerExt.longext]);
+				buffer = reinterpretAsArray!ubyte(headerExt.longext);
 				file.rawWrite(buffer);
 				if (paletteData.length)
 					file.rawWrite(paletteData);
@@ -368,7 +481,7 @@ public class BMP : Image {
 				break;
 			case BMPVersion.WinNT:
 				saveWin3xHeader();
-				buffer = reinterpretCast!ubyte([headerExt.shortext]);
+				buffer = reinterpretAsArray!ubyte(headerExt.shortext);
 				file.rawWrite(buffer);
 				if (paletteData.length)
 					file.rawWrite(paletteData);
@@ -376,47 +489,11 @@ public class BMP : Image {
 				break;
 			default:		//Must be Win1X
 				file.rawWrite(buffer);
-				buffer = reinterpretCast!ubyte([header.oldType]);
+				buffer = reinterpretAsArray!ubyte(header.oldType);
 				file.rawWrite(buffer);
 				saveUncompressed;
 				break;
 		}
-	}
-	/**
-	 * Sets up all the function pointers automatically.
-	 */
-	protected void setupDelegates() @safe pure {
-		switch (getPixelFormat) {
-			case PixelFormat.Indexed1Bit:
-				indexReader8Bit = &_readIndex_1bit;
-				indexWriter8Bit = &_writeIndex_1bit;
-				indexReader16bit = &_indexReadUpconv;
-				pixelReader = &_readAndLookup;
-				pitch = width + width % 8 ? 8 - (width % 8) : 0;
-				break;
-			case PixelFormat.Indexed4Bit:
-				indexReader8Bit = &_readIndex_4bit;
-				indexWriter8Bit = &_writeIndex_4bit;
-				indexReader16bit = &_indexReadUpconv;
-				pixelReader = &_readAndLookup;
-				pitch = width + width % 2 ? 1 : 0;
-				break;
-			case PixelFormat.Indexed8Bit:
-				indexReader8Bit = &_readPixel_8bit;
-				indexWriter8Bit = &_writePixel!(ubyte);
-				indexReader16bit = &_indexReadUpconv;
-				pixelReader = &_readAndLookup;
-				break;
-			case PixelFormat.RGBA8888, PixelFormat.RGBX8888:
-				pixelReader = &_readPixelAndUpconv!(Pixel32BitRGBALE);
-				break;
-			case PixelFormat.RGB888:
-				pixelReader = &_readPixelAndUpconv!(Pixel24Bit);
-				break;
-			default:
-				break;
-		}
-
 	}
 	override uint width() @nogc @safe @property const pure {
 		import std.math : abs;
@@ -489,11 +566,11 @@ public class BMP : Image {
 			case 16:
 				if (headerExt.shortext.redMask == 0xF8000000 && headerExt.shortext.greenMask == 0x07E00000 && 
 						headerExt.shortext.blueMask == 0x001F0000)
-					return PixelFormat.RGB565 || bitmapHeaderLength == 4 + Win3xBitmapHeader.sizeof + WinNTBitmapHeaderExt.sizeof ? 
-							PixelFormat.BigEndian : 0;
+					return PixelFormat.RGB565 | (bitmapHeaderLength == 4 + Win3xBitmapHeader.sizeof + WinNTBitmapHeaderExt.sizeof ? 
+							PixelFormat.BigEndian : 0);
 				else
-					return PixelFormat.RGBX5551 || bitmapHeaderLength == 4 + Win3xBitmapHeader.sizeof + WinNTBitmapHeaderExt.sizeof ? 
-							PixelFormat.BigEndian : 0;
+					return PixelFormat.RGBX5551 | (bitmapHeaderLength == 4 + Win3xBitmapHeader.sizeof + WinNTBitmapHeaderExt.sizeof ? 
+							PixelFormat.BigEndian : 0);
 			case 24:
 				return PixelFormat.RGB888;
 			case 32:
@@ -515,9 +592,23 @@ public class BMP : Image {
 		return PixelFormat.Undefined;
 	}
 }
+
 unittest {
+	import vfile;
 	{
 		std.stdio.File testFile1 = std.stdio.File("./test/bmp/TRU256.BMP");
-		BMP test = BMP.load(testFile1);
+		std.stdio.File testFile2 = std.stdio.File("./test/bmp/TRU256_I.BMP");
+		BMP test1 = BMP.load(testFile1);
+		BMP test2 = BMP.load(testFile2);
+		compareImages!true(test1, test2);
+		VFile backup1, backup2;
+		test1.save(backup1);
+		test2.save(backup2);
+		backup1.seek(0);
+		backup2.seek(0);
+		BMP test01 = BMP.load(backup1);
+		BMP test02 = BMP.load(backup2);
+		compareImages!true(test1, test01);
+		compareImages!true(test2, test02);
 	}
 }

@@ -1,3 +1,10 @@
+/*
+ * dimage - png.d
+ * by Laszlo Szeremi
+ *
+ * Copyright under Boost Software License.
+ */
+
 module dimage.gif;
 
 import std.bitmanip;
@@ -9,12 +16,13 @@ static import std.stdio;
 
 /**
  * Implements reader/writer for *.GIF-files.
- * Animation is accessed from a sliding window, and 
+ * Animation is accessed from a sliding window of setting the required frame.
+ * Requires linking against the ncompress library for LZW support.
  */
 version (lzwsupport) {
 	import ncompress42;
 
-	public class GIF : Image, Animation {
+	public class GIF : Image, MultiImage {
 		/**
 		 * Header for both 87a and 89a versions.
 		 */
