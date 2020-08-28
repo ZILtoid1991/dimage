@@ -1144,8 +1144,11 @@ unittest{
 		mappedRLE = TGA.load!VFile(virtualFile);
 		std.stdio.writeln("Load from virtual file was successful");
 		compareImages(mappedUnc, mappedRLE);
+		
 		{
 			Palette!RGBA5551 p = cast(Palette!RGBA5551)mappedUnc.palette;
+			p.convTo(PixelFormat.ARGB8888);
+			p.convTo(PixelFormat.RGBA8888);
 			//std.stdio.writeln(mappedUnc.getHeader);
 			foreach_reverse (c ; p) {
 			}

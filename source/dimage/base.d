@@ -115,7 +115,7 @@ public class Palette(T) : IPalette {
 				array[i] = OutputType(data[i]);
 			result = new Palette!OutputType(array, format, getBitDepth(format));
 		}
-		switch (format & !(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
+		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
 			case PixelFormat.RGB888:
 				if(format & PixelFormat.BigEndian)
 					converter!(RGB888BE);
