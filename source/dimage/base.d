@@ -206,6 +206,67 @@ public class Palette(T) : IPalette {
 	}
 }
 /**
+ * Palette with separate alpha field, used primarily by PNG.
+ */
+public class PaletteWithSepA(T) : Palette!T {
+	protected ubyte[]		alphaField;
+	///CTOR
+	this(T[] data, ubyte[] alphaField, uint format, ubyte bitDepth) @nogc @safe pure nothrow {
+		assert(data.length == alphaField.length);
+		super(data, format, bitDepth);
+		this.alphaField = alphaField;
+	}
+	///Reads palette in standard format.
+	public override ARGB8888 read(size_t index) @safe pure {
+		if (index < data.length) return ARGB8888(data[index].r, data[index].g, data[index].b, alphaField[index]);
+		else throw new PaletteBoundsException("Palette is being read out of bounds!");
+	}
+	///Returns the raw data cast to ubyte
+	public override ubyte[] raw() @safe pure {
+		return reinterpretCast!ubyte(data) ~ alphaField;
+	}
+	///Converts the palette to the given format if supported.
+	public override IPalette convTo(uint format) @safe {
+		IPalette result;
+		void converter(OutputType)() @safe {
+			OutputType[] array;
+			array.length = data.length;
+			for(int i ; i < data.length ; i++)
+				array[i] = OutputType(read(i));
+			result = new Palette!OutputType(array, format, getBitDepth(format));
+		}
+		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
+			case PixelFormat.RGB888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGB888BE);
+				else
+					converter!(RGB888);
+				break;
+			case PixelFormat.RGBX8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGBA8888BE);
+				else
+					converter!(RGBA8888);
+				break;
+			case PixelFormat.XRGB8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(ARGB8888BE);
+				else
+					converter!(ARGB8888);
+				break;
+			case PixelFormat.RGB565:
+				converter!(RGB565);
+				break;
+			case PixelFormat.RGBX5551:
+				converter!(RGBA5551);
+				break;
+			default:
+				throw new ImageFormatException("Format not supported");
+		}
+		return result;
+	}
+}
+/**
  * Basic imagedata wrapper.
  */
 public interface IImageData {
@@ -1010,6 +1071,14 @@ abstract class Image{
 		if (_palette) return _palette.paletteFormat;
 		else return PixelFormat.Undefined;
 	}
+	///Returns the background color index if there's any. Returns -1 if there's no background color, -2 if background color is not indexed.
+	@property int backgroundColorIndex() @nogc @safe pure nothrow const {
+		return -1;
+	}
+	///Returns the background color if there's any, or a default value otherwise.
+	@property ARGB8888 backgroundColor() @nogc @safe pure nothrow const {
+		return ARGB8888.init;
+	}
 	/**
 	 * Returns the number of planes the image have.
 	 * Default is one.
@@ -1040,7 +1109,7 @@ abstract class Image{
 	 */
 	public ARGB8888 readPalette(size_t index) @safe pure {
 		return _palette.read(index);
-	}	
+	}
 	/**
 	 * Flips the image on the vertical axis. Useful to set images to the correct top-left screen origin point.
 	 */

@@ -1,6 +1,7 @@
 module dimage.types;
 
 import std.bitmanip : bitfields;
+//import std.conv : roundTo;
 
 ///Sets the byteorder of
 enum Endianness {
@@ -12,6 +13,30 @@ alias ARGB8888 = ARGB8888Templ!(Endianness.Little);
 alias ARGB8888BE = ARGB8888Templ!(Endianness.Big);
 
 /**
+ * 4 * 32 bit floating point pixel representation.
+ * Used for RGBA conversion and other things.
+ */
+struct RGBA_f32 {
+	float	fR;
+	float	fG;
+	float	fB;
+	float	fA;
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
+	///Conversion CTOR
+	this(ColorType)(ColorType orig) {
+		this.fR = orig.fR;
+		this.fG = orig.fG;
+		this.fB = orig.fB;
+		this.fA = orig.fA;
+	}
+}
+/**
  * Standard 32 bit pixel representation.
  */
 struct ARGB8888Templ (Endianness byteOrder = Endianness.Little) {
@@ -21,22 +46,68 @@ struct ARGB8888Templ (Endianness byteOrder = Endianness.Little) {
 	}
 	static if (byteOrder == Endianness.Big) {
 		///Red
-		@safe @nogc @property pure ref auto r() inout { return bytes[1]; }
+		@safe @nogc @property nothrow pure ref auto r() inout { return bytes[1]; }
 		///Green
-		@safe @nogc @property pure ref auto g() inout { return bytes[2]; }
+		@safe @nogc @property nothrow pure ref auto g() inout { return bytes[2]; }
 		///Blue
-		@safe @nogc @property pure ref auto b() inout { return bytes[3]; }
+		@safe @nogc @property nothrow pure ref auto b() inout { return bytes[3]; }
 		///Alpha
-		@safe @nogc @property pure ref auto a() inout { return bytes[0]; }
+		@safe @nogc @property nothrow pure ref auto a() inout { return bytes[0]; }
 	} else {
 		///Red
-		@safe @nogc @property pure ref auto r() inout { return bytes[2]; }
+		@safe @nogc @property nothrow pure ref auto r() inout { return bytes[2]; }
 		///Green
-		@safe @nogc @property pure ref auto g() inout { return bytes[1]; }
+		@safe @nogc @property nothrow pure ref auto g() inout { return bytes[1]; }
 		///Blue
-		@safe @nogc @property pure ref auto b() inout { return bytes[0]; }
+		@safe @nogc @property nothrow pure ref auto b() inout { return bytes[0]; }
 		///Alpha
-		@safe @nogc @property pure ref auto a() inout { return bytes[3]; }
+		@safe @nogc @property nothrow pure ref auto a() inout { return bytes[3]; }
+	}
+	static immutable double fRStepping = 1.0 / 255;	///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 255;	///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 255;	///Floating-point blue stepping
+	static immutable double fAStepping = 1.0 / 255;	///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return r * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return g * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return b * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return a * fAStepping;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		//if(val >= 1) r = 255;
+		//else 
+		r = cast(ubyte)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		g = cast(ubyte)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		b = cast(ubyte)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		a = cast(ubyte)(val / fAStepping);
+		return fA;
 	}
 	///Creates a standard pixel representation out from a 4 element array
 	this(ubyte[4] bytes) @safe @nogc pure{
@@ -49,12 +120,19 @@ struct ARGB8888Templ (Endianness byteOrder = Endianness.Little) {
 		this.r = r;
 		this.a = a;
 	}
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
 	///Template for pixel conversion
-	this(T)(T p) @safe @nogc pure {
-		this.b = p.b;
-		this.g = p.g;
-		this.r = p.r;
-		this.a = p.a;
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = orig.fB;
+		this.fG = orig.fG;
+		this.fR = orig.fR;
+		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
 	this(ubyte p) @safe @nogc pure {
@@ -68,7 +146,11 @@ struct ARGB8888Templ (Endianness byteOrder = Endianness.Little) {
 		import std.conv : to;
 		return to!string(r) ~ "," ~ to!string(g) ~ "," ~ to!string(b) ~ "," ~ to!string(a);
 	}
-	static bool hasAlphaChannelSupport() {return true;}
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return true;
+	}
+
 }
 
 alias RGBA8888BE = RGBA8888Templ!(Endianness.Big);
@@ -100,6 +182,50 @@ struct RGBA8888Templ (Endianness byteOrder = Endianness.Little) {
 		///Alpha
 		@safe @nogc @property pure ref auto a() inout { return bytes[0]; }
 	}
+	static immutable double fRStepping = 1.0 / 255;	///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 255;	///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 255;	///Floating-point blue stepping
+	static immutable double fAStepping = 1.0 / 255;	///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return r * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return g * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return b * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return a * fAStepping;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		r = cast(ubyte)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		g = cast(ubyte)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		b = cast(ubyte)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		a = cast(ubyte)(val / fAStepping);
+		return fA;
+	}
 	///Creates a standard pixel representation out from a 4 element array
 	this(ubyte[4] bytes) @safe @nogc pure nothrow {
 		this.bytes = bytes;
@@ -111,12 +237,19 @@ struct RGBA8888Templ (Endianness byteOrder = Endianness.Little) {
 		bytes[2] = b;
 		bytes[3] = a;
 	}
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
 	///Template for pixel conversion
-	this(T)(T p) @safe @nogc pure nothrow {
-		this.b = p.b;
-		this.g = p.g;
-		this.r = p.r;
-		this.a = p.a;
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = orig.fB;
+		this.fG = orig.fG;
+		this.fR = orig.fR;
+		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
 	this(ubyte p) @safe @nogc pure {
@@ -125,7 +258,10 @@ struct RGBA8888Templ (Endianness byteOrder = Endianness.Little) {
 		this.r = p;
 		this.a = 0xFF;
 	}
-	static bool hasAlphaChannelSupport() {return true;}
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return true;
+	}
 }
 alias YA88 = YA88Templ!(Endianness.Little);
 alias YA88BE = YA88Templ!(Endianness.Big);
@@ -137,16 +273,66 @@ struct YA88Templ (Endianness byteOrder = Endianness.Little) {
 		ushort		base;		/// direct access
 		ubyte[2]	channels;	/// individual access
 	}
+	static immutable double fRStepping = 1.0 / 255;	///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 255;	///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 255;	///Floating-point blue stepping
+	static immutable double fAStepping = 1.0 / 255;	///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return y * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return y * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return y * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return a * fAStepping;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		y = cast(ubyte)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		y = cast(ubyte)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		y = cast(ubyte)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		a = cast(ubyte)(val / fAStepping);
+		return fA;
+	}
 	///Standard CTOR
 	this(ubyte y, ubyte a) @safe @nogc pure nothrow {
 		this.y = y;
 		this.a = a;
 	}
-	/// Converter CTOR
-	/// Uses mathematical average to calculate luminance value
-	this(T)(T src) @safe @nogc pure nothrow {
-		y = (src.r + src.g + src.b) / 3;
-		a = src.a;
+	///Standard CTOR
+	///Uses mathematical average to calculate the new values
+	this(float fR, float fG, float fB, float fA) {
+		this.fB = (fB + fG + fR) / 3;
+		this.fA = fA;
+	}
+	///Template for pixel conversion
+	///Uses mathematical average to calculate the new values
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = (orig.fB + orig.fG + orig.fR) / 3;
+		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
 	this(ubyte p) @safe @nogc pure {
@@ -175,7 +361,10 @@ struct YA88Templ (Endianness byteOrder = Endianness.Little) {
 	nothrow @safe @nogc @property pure ubyte g() const { return y; }
 	/// pseudo-blue (output only)
 	nothrow @safe @nogc @property pure ubyte b() const { return y; }
-	static bool hasAlphaChannelSupport() {return true;}
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return true;
+	}
 }
 /**
  * 16 Bit colorspace with a single bit alpha. This is should be used with RGBX5551 with channel `a` ignored
@@ -190,6 +379,50 @@ struct RGBA5551 {
 			bool, "_a", 1,
 		));
 	}
+	static immutable double fRStepping = 1.0 / 31;	///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 31;	///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 31;	///Floating-point blue stepping
+	static immutable double fAStepping = 1.0;		///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return _r * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return _g * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return _b * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return _a ? 1.0 : 0.0;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		_r = cast(ubyte)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		_g = cast(ubyte)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		_b = cast(ubyte)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		_a = val == 0.0;
+		return fA;
+	}
 	/// Standard CTOR with 8bit normalized inputs
 	this(ubyte r, ubyte g, ubyte b, ubyte a) @safe @nogc pure nothrow {
 		_r = r>>3;
@@ -197,12 +430,19 @@ struct RGBA5551 {
 		_b = b>>3;
 		_a = a != 0;
 	}
-	/// Convertion CTOR with 8 bit normalized inputs
-	this(T)(T src) @safe @nogc pure nothrow {
-		_r = src.r>>3;
-		_g = src.g>>3;
-		_b = src.b>>3;
-		_a = src.a != 0;
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
+	///Template for pixel conversion
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = orig.fB;
+		this.fG = orig.fG;
+		this.fR = orig.fR;
+		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
 	this(ubyte p) @safe @nogc pure {
@@ -219,7 +459,10 @@ struct RGBA5551 {
 	nothrow @safe @nogc @property pure ubyte b() const { return cast(ubyte)(_b << 3 | _b >>> 2); }
 	/// upconverted-alpha
 	nothrow @safe @nogc @property pure ubyte a() const { return _a ? 0xFF : 0x00; }
-	static bool hasAlphaChannelSupport() {return true;}
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return true;
+	}
 }
 /**
  * 16 Bit RGB565 colorspace with no alpha.
@@ -233,17 +476,68 @@ struct RGB565 {
 			ubyte, "_r", 5,
 		));
 	}
+	static immutable double fRStepping = 1.0 / 31;	///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 63;	///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 31;	///Floating-point blue stepping
+	static immutable double fAStepping = 1.0;		///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return _r * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return _g * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return _b * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return 1.0;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		_r = cast(ubyte)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		_g = cast(ubyte)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		_b = cast(ubyte)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		return 1.0;
+	}
 	/// Standard CTOR with 8bit normalized inputs
 	this(ubyte r, ubyte g, ubyte b) @safe @nogc pure nothrow {
 		_r = r>>3;
 		_g = g>>2;
 		_b = b>>3;
 	}
-	/// Convertion CTOR with 8 bit normalized inputs
-	this(T)(T src) @safe @nogc pure nothrow {
-		_r = src.r>>3;
-		_g = src.g>>2;
-		_b = src.b>>3;
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
+	///Template for pixel conversion
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = orig.fB;
+		this.fG = orig.fG;
+		this.fR = orig.fR;
+		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
 	this(ubyte p) @safe @nogc pure {
@@ -259,7 +553,10 @@ struct RGB565 {
 	nothrow @safe @nogc @property pure ubyte b() const { return cast(ubyte)(_b << 3 | _b >>> 2); }
 	//pseudo-alpha (output only)
 	nothrow @safe @nogc @property pure ubyte a() const { return 0xFF; }
-	static bool hasAlphaChannelSupport() {return false;}
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return false;
+	}
 }
 alias RGB888 = RGB888Templ!(Endianness.Little);
 alias RGB888BE = RGB888Templ!(Endianness.Big);
@@ -283,17 +580,68 @@ align(1) struct RGB888Templ (Endianness byteOrder = Endianness.Little) {
 		///blue
 		nothrow @safe @nogc @property pure ref auto b() inout { return bytes[0]; }
 	}
+	static immutable double fRStepping = 1.0 / 255;	///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 255;	///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 255;	///Floating-point blue stepping
+	static immutable double fAStepping = 1.0;	///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return r * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return g * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return b * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return 1.0;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		r = cast(ubyte)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		g = cast(ubyte)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		b = cast(ubyte)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		return 1.0;
+	}
 	///Standard CTOR
 	this(ubyte r, ubyte g, ubyte b) pure nothrow @safe @nogc {
 		this.r = r;
 		this.g = g;
 		this.b = b;
 	}
-	///Conversion CTOR
-	this(T)(T src) pure nothrow @safe @nogc {
-		this.r = src.r;
-		this.g = src.g;
-		this.b = src.b;
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
+	///Template for pixel conversion
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = orig.fB;
+		this.fG = orig.fG;
+		this.fR = orig.fR;
+		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
 	this(ubyte p) @safe @nogc pure {
@@ -305,12 +653,18 @@ align(1) struct RGB888Templ (Endianness byteOrder = Endianness.Little) {
 	nothrow @safe @nogc @property pure ubyte a() const { return 0xFF; }
 	///direct access read
 	nothrow @safe @nogc @property pure uint base(){ return 0xff_00_00_00 | r << 16 | g << 8 | b; }
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return false;
+	}
 }
+alias RGB16_16_16 = RGB16_16_16Templ!(Endianness.Little);
+alias RGB16_16_16BE = RGB16_16_16Templ!(Endianness.Big);
 /**
  * 48 bit RGB colorspace with 16 bit per channel.
  * Does not easily convert to 8 bit at the moment.
  */
-public struct RGB16_16_16Templ (Endianness byteOrder = Endianness.Little) {
+align(2) public struct RGB16_16_16Templ (Endianness byteOrder = Endianness.Little) {
 	ushort[3] bytes;				///individual access
 	static if (byteOrder == Endianness.Big) {
 		///red
@@ -327,22 +681,73 @@ public struct RGB16_16_16Templ (Endianness byteOrder = Endianness.Little) {
 		///blue
 		nothrow @safe @nogc @property pure ref auto b() inout { return bytes[0]; }
 	}
+	static immutable double fRStepping = 1.0 / 65_535;///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 65_535;///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 65_535;///Floating-point blue stepping
+	static immutable double fAStepping = 1.0;		///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return r * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return g * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return b * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return 1.0;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		r = cast(ushort)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		g = cast(ushort)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		b = cast(ushort)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		return 1.0;
+	}
 	///Standard CTOR
 	this(ushort r, ushort g, ushort b) pure nothrow @safe @nogc {
 		this.r = r;
 		this.g = g;
 		this.b = b;
 	}
-	/+///Conversion CTOR
-	this(T)(T src) pure nothrow @safe @nogc {
-		this.r = src.r;
-		this.g = src.g;
-		this.b = src.b;
-	}+/
-	/+//pseudo-alpha (output only)
-	nothrow @safe @nogc @property pure ubyte a() const { return 0xFF; }
-	///direct access read
-	nothrow @safe @nogc @property pure uint base(){ return 0xff_00_00_00 | r << 16 | g << 8 | b; }+/
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
+	///Template for pixel conversion
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = orig.fB;
+		this.fG = orig.fG;
+		this.fR = orig.fR;
+		this.fA = orig.fA;
+	}
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return false;
+	}
 }
 /**
  * Pixel format flags.
@@ -355,6 +760,7 @@ public struct RGB16_16_16Templ (Endianness byteOrder = Endianness.Little) {
 enum PixelFormat : uint {
 	BigEndian		=	0x00_01_00_00,		///Always little endian if bit not set
 	ValidAlpha		=	0x00_02_00_00,		///If set, alpha is used
+	SeparateAlphaField	=	0x00_04_00_00,	///If set, then there's a separate alpha field
 	RGBX5551		=	0x1,
 	RGBA5551		=	RGBX5551 | ValidAlpha,
 	RGB565			=	0x2,
@@ -368,6 +774,8 @@ enum PixelFormat : uint {
 	XRGB8888		=	0x41,
 	ARGB8888		=	XRGB8888 | ValidAlpha,
 	RGB16_16_16		=	0x60,
+	RGBX_f32		=	0x101,
+	RGBA_f32		=	RGBX_f32 | ValidAlpha,
 	Indexed1Bit		=	0xF00,
 	Indexed2Bit		=	0xF01,
 	Indexed4Bit		=	0xF02,
@@ -419,4 +827,19 @@ public ubyte getBitDepth(uint format) @nogc @safe pure nothrow {
 		default: 
 			return 0;
 	}
+}
+
+@safe unittest {
+	import std.conv : to;
+	assert(ARGB8888.sizeof == 4);
+	ARGB8888 test0 = ARGB8888(1.0,1.0,1.0,1.0);
+	assert(test0.base == 0xFF_FF_FF_FF, to!string(test0.base));
+	test0.fR = test0.fR - ARGB8888.fRStepping;
+	assert(test0.r == 0xFE, to!string(test0.r));
+	test0.r = 0xFF;
+	assert(test0.fR == 1.0, to!string(test0.fR));
+	RGB16_16_16 test1 = RGB16_16_16(test0);
+	assert(test1.r == 0xFF_FF, to!string(test1.r));
+	assert(test1.g == 0xFF_FF, to!string(test1.g));
+	assert(test1.b == 0xFF_FF, to!string(test1.b));
 }

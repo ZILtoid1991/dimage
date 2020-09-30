@@ -1147,8 +1147,8 @@ unittest{
 		
 		{
 			Palette!RGBA5551 p = cast(Palette!RGBA5551)mappedUnc.palette;
-			p.convTo(PixelFormat.ARGB8888);
-			p.convTo(PixelFormat.RGBA8888);
+			assert(p.convTo(PixelFormat.ARGB8888).length == p.length, "Length mismatch!");
+			assert(p.convTo(PixelFormat.RGBA8888).length == p.length, "Length mismatch!");
 			//std.stdio.writeln(mappedUnc.getHeader);
 			foreach_reverse (c ; p) {
 			}
@@ -1157,26 +1157,43 @@ unittest{
 		}
 	}
 	{
-		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/concreteGUIE3.tga");
-		std.stdio.writeln("Loading ", greyscaleUncFile.name);
-		TGA greyscaleUnc = TGA.load(greyscaleUncFile);
-		std.stdio.writeln("File `", greyscaleUncFile.name, "` successfully loaded");
-		std.stdio.File greyscaleRLEFile = std.stdio.File("test/tga/concreteGUIE3_rle.tga");
-		std.stdio.writeln("Loading ", greyscaleRLEFile.name);
-		TGA greyscaleRLE = TGA.load(greyscaleRLEFile);
-		std.stdio.writeln("File `", greyscaleRLEFile.name, "` successfully loaded");
-		compareImages(greyscaleUnc, greyscaleRLE);
+		std.stdio.File mappedUncFile = std.stdio.File("test/tga/concreteGUIE3.tga");
+		std.stdio.writeln("Loading ", mappedUncFile.name);
+		TGA mappedUnc = TGA.load(mappedUncFile);
+		std.stdio.writeln("File `", mappedUncFile.name, "` successfully loaded");
+		std.stdio.File mappedRLEFile = std.stdio.File("test/tga/concreteGUIE3_rle.tga");
+		std.stdio.writeln("Loading ", mappedRLEFile.name);
+		TGA mappedRLE = TGA.load(mappedRLEFile);
+		std.stdio.writeln("File `", mappedRLEFile.name, "` successfully loaded");
+		compareImages(mappedUnc, mappedRLE);
 		//store the uncompressed one as a VFile in the memory using RLE, then restore it and check if it's working.
-		greyscaleUnc.getHeader.imageType = TGA.Header.ImageType.RLEMapped;
+		mappedUnc.getHeader.imageType = TGA.Header.ImageType.RLEMapped;
 		VFile virtualFile;// = VFile(tempStream);
 		//std.stdio.File virtualFile = std.stdio.File("test/tga/grey_8_rle_gen.tga", "wb");
-		greyscaleUnc.save!(VFile, false, false, true)(virtualFile);
+		mappedUnc.save!(VFile, false, false, true)(virtualFile);
 		std.stdio.writeln("Save to virtual file was successful");
 		std.stdio.writeln(virtualFile.size);
 		virtualFile.seek(0);
-		greyscaleRLE = TGA.load!VFile(virtualFile);
+		mappedRLE = TGA.load!VFile(virtualFile);
 		std.stdio.writeln("Load from virtual file was successful");
-		compareImages(greyscaleUnc, greyscaleRLE);
+		compareImages(mappedUnc, mappedRLE);
+		
+		{
+			IPalette p = mappedUnc.palette;
+			assert(p.convTo(PixelFormat.ARGB8888).length == p.length, "Length mismatch!");
+			assert(p.convTo(PixelFormat.RGBA8888).length == p.length, "Length mismatch!");
+		}
+	}
+	{
+		std.stdio.File mappedUncFile = std.stdio.File("test/tga/sci-fi-tileset.tga");
+		std.stdio.writeln("Loading ", mappedUncFile.name);
+		TGA mappedUnc = TGA.load(mappedUncFile);
+		std.stdio.writeln("File `", mappedUncFile.name, "` successfully loaded");
+		{
+			IPalette p = mappedUnc.palette;
+			assert(p.convTo(PixelFormat.ARGB8888).length == p.length, "Length mismatch!");
+			assert(p.convTo(PixelFormat.RGBA8888).length == p.length, "Length mismatch!");
+		}
 	}
 	{
 		std.stdio.File greyscaleUncFile = std.stdio.File("test/tga/truecolor_16.tga");

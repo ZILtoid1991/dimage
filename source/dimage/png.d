@@ -42,6 +42,13 @@ public class PNG : Image{
 		Transparency		=	"tRNS",		///Transparency
 		CompTextData		=	"zTXt",		///Compressed textual data
 	}
+	static enum FilterType : ubyte {
+		None,
+		Sub,
+		Up,
+		Average,
+		Paeth,
+	}
 	static enum HEADER_INIT = "IHDR";		///Initializes header in the file
 	static enum PALETTE_INIT = "PLTE";		///Initializes palette in the file
 	static enum DATA_INIT = "IDAT";			///Initializes image data in the file
@@ -130,7 +137,7 @@ public class PNG : Image{
 		/**
 		 * Converts the struct to little endian on systems that need them.
 		 */
-		public void bigEndianToNative(){
+		public void bigEndianToNative() @safe @nogc pure nothrow {
 			version(LittleEndian){
 				width = swapEndian(width);
 				height = swapEndian(height);
@@ -139,7 +146,7 @@ public class PNG : Image{
 		/**
 		 * Returns a copy of the struct that is in big endian.
 		 */
-		public Header nativeToBigEndian(){
+		public Header nativeToBigEndian() @safe pure nothrow {
 			version(LittleEndian)
 				return Header(swapEndian(width), swapEndian(height), bitDepth, colorType, compression, filter, interlace);
 			else
@@ -148,7 +155,7 @@ public class PNG : Image{
 		/**
 		 * For debugging purposes.
 		 */
-		public string toString(){
+		public string toString() const {
 			import std.conv : to;
 			return "width: " ~ to!string(width) ~ "\n" ~
 				"height: " ~ to!string(height) ~ "\n" ~
@@ -162,7 +169,10 @@ public class PNG : Image{
 	protected Header		header;
 	public EmbeddedData[]	ancillaryChunks;		///Stores ancilliary chunks that are not essential for image processing
 	protected ubyte[]		filterBytes;			///Filterbytes for each scanline
-	protected size_t pitch;
+	protected int			bkgIndex = -1;			///Background index
+	protected RGB16_16_16BE	bkgColor;				///Background color
+	protected RGB16_16_16BE	trns;					///Transparency
+	protected size_t		pitch;
 	/**
 	 * Creates an empty PNG file in memory
 	 */
@@ -211,7 +221,7 @@ public class PNG : Image{
 		if(ret != zlib.Z_OK)
 			throw new Exception("Decompressor initialization error");
 
-		ubyte[] readBuffer, imageBuffer, imageTemp, paletteTemp;
+		ubyte[] readBuffer, imageBuffer, imageTemp, paletteTemp, paletteTemp0;
 		readBuffer.length = 8;
 		file.rawRead(readBuffer);
 		for(int i ; i < 8 ; i++)
@@ -227,8 +237,8 @@ public class PNG : Image{
 				file.rawRead(readBuffer);
 			//std.stdio.writeln("pos:", file.tell);
 			switch(curChunk.identifier){
-				case HEADER_INIT:
-					result.header = *(cast(Header*)(cast(void*)readBuffer.ptr));
+				case ChunkInitializers.Header:
+					result.header = reinterpretGet!Header(readBuffer);
 					result.header.bigEndianToNative;
 					version (unittest) std.stdio.writeln(result.header);
 					result.pitch = (result.header.width * result.getBitdepth) / 8;
@@ -239,11 +249,35 @@ public class PNG : Image{
 					strm.avail_out = cast(uint)imageBuffer.length;
 					//result.pitch = result.header.width;
 					break;
-				case PALETTE_INIT:
+				case ChunkInitializers.Palette:
 					paletteTemp = readBuffer.dup;
 					pos = EmbeddedData.DataPosition.BeforeIDAT;
 					break;
-				case DATA_INIT:
+				case ChunkInitializers.Transparency:
+					void switchEndianForTrns() {
+						result.trns.r = swapEndian(result.trns.r);
+						result.trns.g = swapEndian(result.trns.g);
+						result.trns.b = swapEndian(result.trns.b);
+					}
+					switch (result.header.colorType){
+						case ColorType.Indexed:
+							if(readBuffer.length == paletteTemp.length) paletteTemp0 = readBuffer.dup;
+							else if (readBuffer.length == RGB16_16_16BE.sizeof) goto case ColorType.TrueColor;
+							break;
+						case ColorType.TrueColor:
+							result.trns = reinterpretGet!RGB16_16_16BE(readBuffer);
+							switchEndianForTrns;
+							break;
+						case ColorType.Greyscale:
+							const ushort value = reinterpretGet!ushort(readBuffer);
+							result.trns = RGB16_16_16BE(value, value, value);
+							switchEndianForTrns;
+							break;
+						default:
+							break;
+					}
+					break;
+				case ChunkInitializers.Data:
 					//if(result.header.compression)
 					//imageBuffer ~= cast(ubyte[])decompressor.uncompress(cast(void[])readBuffer);
 					//else
@@ -271,12 +305,37 @@ public class PNG : Image{
 					}
 					
 					break;
-				case END_INIT:
+				case ChunkInitializers.Background:
+					void switchEndianForBKGColor() {
+						result.bkgColor.r = swapEndian(result.bkgColor.r);
+						result.bkgColor.g = swapEndian(result.bkgColor.g);
+						result.bkgColor.b = swapEndian(result.bkgColor.b);
+					}
+					switch (result.header.colorType) {
+						case ColorType.Indexed:
+							result.bkgIndex = readBuffer[0];
+							break;
+						case ColorType.Greyscale, ColorType.GreyscaleWithAlpha:
+							result.bkgIndex = -2;
+							const ushort value = reinterpretGet!ushort(readBuffer);
+							result.bkgColor = RGB16_16_16BE(value, value, value);
+							switchEndianForBKGColor();
+							break;
+						case ColorType.TrueColor, ColorType.TrueColorWithAlpha:
+							result.bkgIndex = -2;
+							result.bkgColor = reinterpretGet!RGB16_16_16BE(readBuffer);
+							switchEndianForBKGColor();
+							break;
+						default:
+							break;
+					}
+					break;
+				case ChunkInitializers.End:
 					version (unittest) assert(result.header.height == scanlineCounter, "Scanline count mismatch");
 					if(imageTemp.length + result.filterBytes.length > strm.total_out){
 						zlib.inflateEnd(&strm);
 						//version(unittest) std.stdio.writeln()
-						throw new Exception("Decompression error! Image ended at: " ~ to!string(strm.total_out) ~ 
+						throw new ImageFileCompressionException("Decompression error! Image ended at: " ~ to!string(strm.total_out) ~ 
 						"; Required length: " ~ to!string(imageTemp.length));
 					}
 					imageTemp.reserve(result.height * result.pitch);
@@ -292,9 +351,13 @@ public class PNG : Image{
 						std.stdio.writeln ("ID: " , curChunk.identifier, " size: ", readBuffer.length, " pos: ", pos);
 					}
 					break;
+				
 			}
-			if(paletteTemp) {
-				result._palette = new Palette!RGB888BE(reinterpretCast!RGB888BE(paletteTemp), PixelFormat.RGB888, 24);
+			if (paletteTemp.length) {
+				if(paletteTemp0.length) result._palette = new PaletteWithSepA!RGB888BE(reinterpretCast!RGB888BE(paletteTemp), 
+						paletteTemp0, PixelFormat.RGB888 | PixelFormat.ValidAlpha | PixelFormat.BigEndian, 24);
+				else result._palette = new Palette!RGB888BE(reinterpretCast!RGB888BE(paletteTemp), PixelFormat.RGB888 | 
+						PixelFormat.BigEndian, 24);
 			}
 			//calculate crc
 			//if(curChunk.dataLength){
@@ -305,7 +368,7 @@ public class PNG : Image{
 			static if(chksmTest == ChecksumPolicy.Enable){
 				if(readBuffer != crc)
 					throw new ChecksumMismatchException("Checksum error");
-			}else static if(chksmTest == ChecksumPolicy.DisableAncillary){
+			}else static if(chksmTest == ChecksumPolicy.DisableAncillary) {
 				if(readBuffer != crc && (curChunk.identifier == HEADER_INIT || curChunk.identifier == PALETTE_INIT || 
 						curChunk.identifier == DATA_INIT || curChunk.identifier == END_INIT))
 					throw new ChecksumMismatchException("Checksum error");
@@ -314,15 +377,31 @@ public class PNG : Image{
 			readBuffer.length = 8;
 		} while(!iend);
 		zlib.inflateEnd(&strm);//should have no data remaining
-		/+for (int line ; line < result.height ; line++) {
-			imageTemp ~= imageBuffer[0..result.pitch];
-			result.filterBytes ~= imageBuffer[result.pitch];
-			if (imageBuffer.length)
-				imageBuffer = imageBuffer[result.pitch + 1..$];
-		}+/
 		assert(imageTemp.length == result.pitch * result.header.height, "Image size mismatch. Expected size: " ~ 
 				to!string(result.pitch * result.header.height) ~ "; Actual size: " ~ to!string(imageTemp.length) ~ 
 				"; Pitch length: " ~ to!string(result.pitch) ~ "; N of scanlines: " ~ to!string(result.header.height));
+		//reconstruct image from filtering
+		ubyte[] scanline, prevScanline;
+		for (uint y ; y < result.filterBytes.length ; y++) {
+			scanline = imageTemp[(y * result.pitch)..((y + 1) * result.pitch)];
+			switch (result.filterBytes[y]) {
+				case FilterType.Sub:
+					reconstructScanlineSub(scanline, result.getBitdepth>>>3);
+					break;
+				case FilterType.Up:
+					reconstructScanlineUp(scanline, prevScanline);
+					break;
+				case FilterType.Average:
+					reconstructScanlineAverage(scanline, prevScanline, result.getBitdepth>>>3);
+					break;
+				case FilterType.Paeth:
+					reconstructScanlinePaeth(scanline, prevScanline, result.getBitdepth>>>3);
+					break;
+				default:
+					break;
+			}
+			prevScanline = scanline;
+		}
 		//setup imagedata
 		switch (result.getPixelFormat & ~PixelFormat.BigEndian) {
 			case PixelFormat.Indexed1Bit: 
@@ -361,7 +440,62 @@ public class PNG : Image{
 		}
 		return result;
 	}
-	
+	/**
+	 * Reconstructs a scanline from `Sub` filtering.
+	 */
+	protected static ubyte[] reconstructScanlineSub(ubyte[] target, int bytedepth) @nogc @safe pure nothrow {
+		for (size_t i = bytedepth ; i < target.length ; i++) {
+			target[i] += target[i - bytedepth];
+		}
+		return target;
+	}
+	/**
+	 * Reconstructs a scanline from `Up` filtering.
+	 */
+	protected static ubyte[] reconstructScanlineUp(ubyte[] target, ubyte[] prevScanline) @nogc @safe pure nothrow {
+		assert(target.length == prevScanline.length);
+		for (size_t i ; i < target.length ; i++) {
+			target[i] += prevScanline[i];
+		}
+		return target;
+	}
+	/**
+	 * Reconstructs a scanline from `Average` filtering
+	 */
+	protected static ubyte[] reconstructScanlineAverage(ubyte[] target, ubyte[] prevScanline, int bytedepth) 
+				@nogc @safe pure nothrow {
+		assert(target.length == prevScanline.length);
+		for (size_t i = bytedepth ; i < target.length ; i++) {
+			target[i] += cast(ubyte)((target[i - bytedepth] + prevScanline[i])>>>1);
+		}
+		return target;
+	}
+	/**
+	 * Paeth function for filtering and reconstruction.
+	 */
+	protected static ubyte paethFunc(const ubyte a, const ubyte b, const ubyte c) @nogc @safe pure nothrow {
+		import std.math : abs;
+		const int p = a + b - c;
+		const int pa = abs(p - a);
+		const int pb = abs(p - b);
+		const int pc = abs(p - c);
+		if (pa <= pb && pa <= pc) return a;
+		else if (pb <= pc) return b;
+		else return c;
+	}
+	/**
+	 * Reconstructs a scanline from `Paeth` filtering.
+	 */
+	protected static ubyte[] reconstructScanlinePaeth(ubyte[] target, ubyte[] prevScanline, int bytedepth)
+				@nogc @safe pure nothrow {
+		assert(target.length == prevScanline.length);
+		
+		for (size_t i = bytedepth ; i < target.length ; i+=bytedepth) {
+			const ubyte a = target[i - bytedepth], b = prevScanline[i], c = prevScanline[i - bytedepth];
+			target[i] += paethFunc(a, b, c);
+		}
+		return target;
+	}
 	/**
 	 * Saves the file to the disk.
 	 * Currently interlaced mode is unsupported.
@@ -370,7 +504,29 @@ public class PNG : Image{
 		ubyte[] crc;
 		ubyte[] paletteData;
 		if (_palette) paletteData = _palette.raw;
-		ubyte[] imageTemp = _imageData.raw;
+		ubyte[] imageTemp0 = _imageData.raw, imageTemp;
+		ubyte[] scanline, prevScanline;
+		for (uint y ; y < height ; y++) {
+			scanline = imageTemp0[(y * pitch)..((y + 1) * pitch)];
+			switch(filterBytes[y]) {
+				case FilterType.Sub:
+					imageTemp ~= filterScanlineSub(scanline, getBitdepth>>>3);
+					break;
+				case FilterType.Up:
+					imageTemp ~= filterScanlineUp(scanline, prevScanline);
+					break;
+				case FilterType.Average:
+					imageTemp ~= filterScanlineAverage(scanline, prevScanline, getBitdepth>>>3);
+					break;
+				case FilterType.Paeth:
+					imageTemp ~= filterScanlinePaeth(scanline, prevScanline, getBitdepth>>>3);
+					break;
+				default:
+					imageTemp ~= scanline;
+					break;
+			}
+			prevScanline = scanline;
+		}
 		//write PNG signature into file
 		file.rawWrite(PNG_SIGNATURE);
 		//write Header into file
@@ -485,6 +641,63 @@ public class PNG : Image{
 		file.rawWrite(writeBuffer);
 		file.rawWrite(PNG_CLOSER);
 	}
+	/**
+	 * Encodes a scanline using `Sub` filter.
+	 */
+	protected static ubyte[] filterScanlineSub(ubyte[] target, int byteDepth) @safe pure nothrow {
+		ubyte[] result;
+		result.length = target.length;
+		for (size_t i ; i < byteDepth ; i++) {
+			result[i] = target[i];
+		}
+		for (size_t i = byteDepth ; i < target.length ; i++) {
+			result[i] = cast(ubyte)(target[i] - target[i - byteDepth]);
+		}
+		return result;
+	}
+	/**
+	 * Encodes a scanline using `Up` filter.
+	 */
+	protected static ubyte[] filterScanlineUp(ubyte[] target, ubyte[] prevScanline) @safe pure nothrow {
+		ubyte[] result;
+		result.length = target.length;
+		for (size_t i ; i < target.length ; i++) {
+			result[i] = cast(ubyte)(target[i] - prevScanline[i]);
+		}
+		return result;
+	}
+	/**
+	 * Encodes a scanline using `Average` filter.
+	 */
+	protected static ubyte[] filterScanlineAverage(ubyte[] target, ubyte[] prevScanline, int byteDepth) @safe pure nothrow {
+		ubyte[] result;
+		result.length = target.length;
+		for (size_t i ; i < byteDepth ; i++) {
+			result[i] = target[i];
+		}
+		for (size_t i = byteDepth ; i < target.length ; i++) {
+			result[i] = cast(ubyte)(target[i] - (target[i - byteDepth] + prevScanline[i])>>>1);
+		}
+		return result;
+	}
+	/**
+	 * Encodes a scanline using `Paeth` filter.
+	 */
+	protected static ubyte[] filterScanlinePaeth(ubyte[] target, ubyte[] prevScanline, int byteDepth) @safe pure nothrow {
+		ubyte[] result;
+		result.length = target.length;
+		for (size_t i ; i < byteDepth ; i++) {
+			result[i] = target[i];
+		}
+		for (size_t i = byteDepth ; i < target.length ; i++) {
+			const ubyte a = target[i - byteDepth], b = prevScanline[i], c = prevScanline[i - byteDepth];
+			result[i] = cast(ubyte)(target[i] - paethFunc(a, b, c));
+		}
+		return result;
+	}
+	/**
+	 * Adds an ancillary chunk to the PNG file
+	 */
 	public void addAncilliaryChunk(EmbeddedData.DataPosition pos, char[4] identifier, ubyte[] data){
 		ancillaryChunks ~= new EmbeddedData(pos, identifier, data);
 	}
@@ -531,7 +744,8 @@ public class PNG : Image{
 		}
 	}
 	override uint getPalettePixelFormat() @nogc @safe @property const pure{
-		return PixelFormat.RGB888;
+		if (_palette) return _palette.paletteFormat;
+		else return PixelFormat.Undefined;
 	}
 	/**
 	 * Returns the header.
@@ -545,32 +759,15 @@ public class PNG : Image{
 unittest{
 	import vfile;
 	import dimage.tga;
-	/+void compareImages(Image a, Image b){
-		assert(a.width == b.width);
-		assert(a.height == b.height);
-		//Check if the data in the two are identical
-		for(ushort y; y < a.height; y++){
-			for(ushort x; x < a.width; x++){
-				assert(a.readPixel(x,y) == b.readPixel(x,y), "Error at position (" ~ to!string(x) ~ "," ~ to!string(y) ~ ")! \n" ~ 
-						"a = " ~ to!string(a.readPixel(x,y)) ~ " ; b = " ~ to!string(b.readPixel(x,y)));
-			}
-		}
-		/+if (a.isIndexed && b.isIndexed) {
-			auto aPal = a.palette;
-			auto bPal = b.palette;
-			for (ushort i ; i < aPal.length ; i++) {
-				assert(aPal[i] == bPal[i], "Error at position " ~ to!string(i) ~ "!");
-			}
-		}+/
-	}+/
 	{
 		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE24.png");
 		std.stdio.writeln("Loading ", indexedPNGFile.name);
 		PNG a = PNG.load(indexedPNGFile);
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
+		std.stdio.writeln(a.filterBytes);
 		assert(a.getBitdepth == 24, "Bitdepth error!");
-		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
-		//a.save(output);
+		std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
+		a.save(output);
 		VFile virtualIndexedPNGFile;
 		a.save(virtualIndexedPNGFile);
 		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
@@ -595,6 +792,16 @@ unittest{
 		std.stdio.writeln("Image restored from virtual file");
 		compareImages(a, b);
 		std.stdio.writeln("The two images' output match");
+	}
+	//test indexed png files and their palettes
+	{
+		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/sci-fi-tileset.png");
+		std.stdio.writeln("Loading ", indexedPNGFile.name);
+		PNG a = PNG.load(indexedPNGFile);
+		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
+		IPalette p = a.palette;
+		assert(p.convTo(PixelFormat.ARGB8888).length == p.length);
+		assert(p.convTo(PixelFormat.ARGB8888 | PixelFormat.BigEndian).length == p.length);
 	}
 	//test against TGA versions of the same images
 	/+{
