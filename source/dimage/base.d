@@ -64,8 +64,10 @@ public interface IPalette {
 	public @property uint paletteFormat() @nogc @safe pure nothrow const;
 	///Converts the palette to the given format if supported
 	public IPalette convTo(uint format) @safe;
-	///Reads palette in standard format
+	///Reads palette in standard indexed format
 	public ARGB8888 read(size_t index) @safe pure;
+	///Reads palette in standard floating point format
+	public RGBA_f32 readF(size_t index) @safe pure;
 	///Returns the raw data cast to ubyte
 	public ubyte[] raw() @safe pure;
 }
@@ -154,6 +156,11 @@ public class Palette(T) : IPalette {
 		if (index < data.length) return ARGB8888(data[index]);
 		else throw new PaletteBoundsException("Palette is being read out of bounds!");
 	}
+	///Reads palette in standard format.
+	public RGBA_f32 readF(size_t index) @safe pure {
+		if (index < data.length) return RGBA_f32(data[index]);
+		else throw new PaletteBoundsException("Palette is being read out of bounds!");
+	}
 	///Palette indexing.
 	public ref T opIndex(size_t index) @safe pure {
 		if (index < data.length) return data[index];
@@ -221,6 +228,15 @@ public class PaletteWithSepA(T) : Palette!T {
 		if (index < data.length) return ARGB8888(data[index].r, data[index].g, data[index].b, alphaField[index]);
 		else throw new PaletteBoundsException("Palette is being read out of bounds!");
 	}
+	///Reads palette in standard format.
+	public override RGBA_f32 readF(size_t index) @safe pure {
+		if (index < data.length) {
+			RGBA_f32 result = RGBA_f32(data[index]);
+			result.fA = alphaField[index] * (1.0 / ubyte.max);
+			return result;
+		}
+		else throw new PaletteBoundsException("Palette is being read out of bounds!");
+	}
 	///Returns the raw data cast to ubyte
 	public override ubyte[] raw() @safe pure {
 		return reinterpretCast!ubyte(data) ~ alphaField;
@@ -286,6 +302,9 @@ public interface IImageData {
 	///Reads the image at the given point in ARGB32 format.
 	///Does palette lookup if needed.
 	public ARGB8888 read(uint x, uint y) @safe pure;
+	///Reads the image at the given point in RGBA_f32 format.
+	///Does palette lookup if needed.
+	public RGBA_f32 readF(uint x, uint y) @safe pure;
 	///Flips the image horizontally
 	public void flipHorizontal() @safe pure;
 	///Flips the image vertically
@@ -301,13 +320,22 @@ public class ImageData(T) : IImageData {
 	protected uint			_width, _height, _pixelFormat;
 	protected ubyte			_bitDepth;
 	///CTOR
-	public this(T[] data, uint _width, uint _height, uint _pixelFormat, ubyte _bitDepth) {
+	public this(T[] data, uint width, uint height, uint pixelFormat, ubyte bitDepth) @safe pure {
 		//assert(data.length == _width * _height);
 		this.data = data;
-		this._width = _width;
-		this._height = _height;
-		this._pixelFormat = _pixelFormat;
-		this._bitDepth = _bitDepth;
+		this._width = width;
+		this._height = height;
+		this._pixelFormat = pixelFormat;
+		this._bitDepth = bitDepth;
+	}
+	///CTOR with no preexisting image data
+	public this(uint width, uint height, uint pixelFormat, ubyte bitDepth) @safe pure {
+		//assert(data.length == _width * _height);
+		this.data.length = width * height;
+		this._width = width;
+		this._height = height;
+		this._pixelFormat = pixelFormat;
+		this._bitDepth = bitDepth;
 	}
 	///Returns the raw data
 	public @property T[] getData() @nogc @safe pure nothrow {
@@ -347,20 +375,30 @@ public class ImageData(T) : IImageData {
 				array[i] = OutputType(data[i]);
 			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
 		}
-		void monochrome8bitConverter() @safe {
-			static if (is(T == ubyte)) {
-				result = new ImageData!ubyte(data, _width, _height, format, getBitDepth(format));
-			} else {
-				ubyte[] array;
-				array.length = data.length;
-				for(int i ; i < data.length ; i++)
-					array[i] = cast(ubyte)((data[i].r + data[i].g + data[i].b) / 3);
-				result = new ImageData!ubyte(array, _width, _height, format, getBitDepth(format));
-			}
-		}
 		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ushort)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ushort.fYStepping);
+					}
+				}
+				result = mid;
+				break;
 			case PixelFormat.Grayscale8Bit:
-				monochrome8bitConverter;
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ubyte)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ubyte.fYStepping);
+					}
+				}
+				result = mid;
 				break;
 			case PixelFormat.YX88:
 				if(format & PixelFormat.BigEndian)
@@ -401,6 +439,10 @@ public class ImageData(T) : IImageData {
 		if(x < _width && y < _height) return ARGB8888(data[x + (y * _width)]);
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return RGBA_f32(data[x + (y * _width)]);
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
 	public ref T opIndex(uint x, uint y) @safe pure {
 		if(x < _width && y < _height) return data[x + (y * _width)];
 		else throw new ImageBoundsException("Image is being read out of bounds!");
@@ -427,6 +469,653 @@ public class ImageData(T) : IImageData {
 	}
 }
 /**
+ * Monochrome imagedata container for 8 and 16 bit types.
+ */
+public class MonochromeImageData (T) : IImageData {
+	public static immutable double fYStepping = 1.0 / T.max;
+	protected T[]			data;
+	protected uint			_width, _height, _pixelFormat;
+	protected ubyte			_bitDepth;
+	public this(T[] data, uint width, uint height, uint pixelFormat, ubyte bitDepth) @safe pure {
+		//assert(data.length == _width * _height);
+		this.data = data;
+		this._width = width;
+		this._height = height;
+		this._pixelFormat = pixelFormat;
+		this._bitDepth = bitDepth;
+	}
+	///CTOR with no preexisting image data
+	public this(uint width, uint height, uint pixelFormat, ubyte bitDepth) @safe pure {
+		//assert(data.length == _width * _height);
+		this.data.length = width * height;
+		this._width = width;
+		this._height = height;
+		this._pixelFormat = pixelFormat;
+		this._bitDepth = bitDepth;
+	}
+	///Returns the width of the image.
+	public @property uint width() @nogc @safe pure nothrow const {
+		return _width;
+	}
+	///Returns the height of the image.
+	public @property uint height() @nogc @safe pure nothrow const {
+		return _height;
+	}
+	///Returns the bitdepth of the image.
+	public @property ubyte bitDepth() @nogc @safe pure nothrow const {
+		static if(is(T == ubyte)) return 8;
+		else return 16;
+	}
+	///Returns the number of bitplanes per image.
+	///Default should be 1.
+	public @property ubyte bitplanes() @nogc @safe pure nothrow const {
+		return 1;
+	}
+	///Returns the color format of the image.
+	public @property uint pixelFormat() @nogc @safe pure nothrow const {
+		static if(is(T == ubyte)) return PixelFormat.Grayscale8Bit;
+		else return PixelFormat.Grayscale16Bit;
+	}
+	///Converts the imagedata to the given format if supported
+	public IImageData convTo(uint format) @safe {
+		IImageData result;
+		void converter(OutputType)() @safe {
+			OutputType[] array;
+			array.length = data.length;
+			for(int i ; i < data.length ; i++)
+				array[i] = OutputType(data[i] * fYStepping);
+			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
+		}
+		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ushort)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ushort.fYStepping);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.Grayscale8Bit:
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ubyte)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ubyte.fYStepping);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.YX88:
+				if(format & PixelFormat.BigEndian)
+					converter!(YA88BE);
+				else
+					converter!(YA88);
+				break;
+			case PixelFormat.RGB888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGB888BE);
+				else
+					converter!(RGB888);
+				break;
+			case PixelFormat.RGBX8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGBA8888BE);
+				else
+					converter!(RGBA8888);
+				break;
+			case PixelFormat.XRGB8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(ARGB8888BE);
+				else
+					converter!(ARGB8888);
+				break;
+			case PixelFormat.RGB565:
+				converter!(RGB565);
+				break;
+			case PixelFormat.RGBX5551:
+				converter!(RGBA5551);
+				break;
+			default:
+				throw new ImageFormatException("Format not supported");
+		}
+		return result;
+	}
+	///Reads the image at the given point in ARGB32 format.
+	public ARGB8888 read(uint x, uint y) @safe pure {
+		static if (is(T == ubyte)) {
+			if(x < _width && y < _height) return ARGB8888(data[x + (y * _width)]);
+			else throw new ImageBoundsException("Image is being read out of bounds!");
+		} else static if (is(T == ushort)) {
+			if(x < _width && y < _height) return ARGB8888(cast(ubyte)(cast(uint)data[x + (y * _width)]>>>8));
+			else throw new ImageBoundsException("Image is being read out of bounds!");
+		}
+	}
+	///Reads the image at the given point in RGBA_f32 format.
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return RGBA_f32(data[x + (y * _width)] * fYStepping);
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public ref T opIndex(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return data[x + (y * _width)];
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	///Flips the image horizontally
+	public void flipHorizontal() @safe pure {
+		for (uint y ; y < _height ; y++) {
+			for (uint x ; x < _width / 2 ; x++) {
+				const T tmp = opIndex(x, y);
+				opIndex(x, y) = opIndex(_width - x, y);
+				opIndex(_width - x, y) = tmp;
+			}
+		}
+	}
+	///Flips the image vertically
+	public void flipVertical() @safe pure {
+		import std.algorithm.mutation : swapRanges;
+		for (uint y ; y < _height / 2 ; y++) {
+			const uint y0 = _height - y - 1;
+			T[] a = data[(y * _width)..((y + 1) * _width)];
+			T[] b = data[(y0 * _width)..((y0 + 1) * _width)];
+			swapRanges(a, b);
+		}
+	}
+	///Returns the raw data cast to ubyte
+	public ubyte[] raw() @safe pure {
+		return reinterpretCast!ubyte(data);
+	}
+}
+/**
+ * 4 Bit indexed image data.
+ */
+public class MonochromeImageData4Bit : IImageData {
+	public static immutable double fYStepping = 1.0 / 15;
+	protected ubyte[]		data;
+	protected NibbleArray	accessor;
+	protected uint			_width, _height, _pitch;
+	///CTOR
+	public this(ubyte[] data,  uint width, uint height) @safe pure {
+		this.data = data;
+		this._width = width;
+		this._height = height;
+		_pitch = _width + (_width % 2);
+		accessor = NibbleArray(data, _pitch * _height);
+	}
+	///CTOR with no preexisting image data
+	public this(uint width, uint height) @safe pure {
+		//assert(data.length == _width * _height);
+		this._width = width;
+		this._height = height;
+		_pitch = _width + (_width % 2);
+		this.data.length = _pitch * _height;
+		accessor = NibbleArray(data, _pitch * _height);
+	}
+	///Returns the raw data
+	public @property NibbleArray getData() @nogc @safe pure nothrow {
+		return accessor;
+	}
+	///Returns the raw data cast to ubyte
+	public ubyte[] raw() @safe pure {
+		return data;
+	}
+	///Returns the width of the image.
+	public @property uint width() @nogc @safe pure nothrow const {
+		return _width;
+	}
+	///Returns the height of the image.
+	public @property uint height() @nogc @safe pure nothrow const {
+		return _height;
+	}
+
+	public @property ubyte bitDepth() @nogc @safe pure nothrow const {
+		return 4;
+	}
+
+	public @property ubyte bitplanes() @nogc @safe pure nothrow const {
+		return 1;
+	}
+
+	public @property uint pixelFormat() @nogc @safe pure nothrow const {
+		return PixelFormat.Grayscale4Bit;
+	}
+
+	public IImageData convTo(uint format) @safe {
+		IImageData result;
+		void converter(OutputType)() @safe {
+			OutputType[] array;
+			array.reserve(_width * _height);
+			for (uint y ; y < _height ; y++) {
+				for (uint x ; x < _width ; x++) {
+					array ~= OutputType(readF(x, y));
+				}
+			}
+			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
+		}
+		
+		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
+			
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const ubyte val = opIndex(x, y);
+						mid[x,y] = cast(ushort)(val * 0x1111);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.Grayscale8Bit:
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const ubyte val = opIndex(x, y);
+						mid[x,y] = cast(ubyte)(val<<4 | val);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.YX88:
+				if(format & PixelFormat.BigEndian)
+					converter!(YA88BE);
+				else
+					converter!(YA88);
+				break;
+			case PixelFormat.RGB888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGB888BE);
+				else
+					converter!(RGB888);
+				break;
+			case PixelFormat.RGBX8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGBA8888BE);
+				else
+					converter!(RGBA8888);
+				break;
+			case PixelFormat.XRGB8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(ARGB8888BE);
+				else
+					converter!(ARGB8888);
+				break;
+			case PixelFormat.RGB565:
+				converter!(RGB565);
+				break;
+			case PixelFormat.RGBX5551:
+				converter!(RGBA5551);
+				break;
+			default:
+				throw new ImageFormatException("Format not supported");
+		}
+		return result;
+	}
+	public ARGB8888 read(uint x, uint y) @safe pure {
+		const ubyte val = opIndex(x,y);
+		return ARGB8888(val<<4 | val);
+	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		const ubyte val = opIndex(x,y);
+		return RGBA_f32(val * fYStepping);
+	}
+	public ubyte opIndex(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)];
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public ubyte opIndexAssign(ubyte val, uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)] = val;
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	///Flips the image horizontally
+	public void flipHorizontal() @safe pure {
+		for (uint y ; y < _height ; y++) {
+			for (uint x ; x < _width>>>1 ; x++) {
+				const ubyte tmp = opIndex(x, y);
+				opIndexAssign(opIndex(_width - x, y), x, y);
+				opIndexAssign(tmp, _width - x, y);
+			}
+		}
+	}
+	///Flips the image vertically
+	public void flipVertical() @safe pure {
+		import std.algorithm.mutation : swapRanges;
+		for (uint y ; y < _height / 2 ; y++) {
+			const uint y0 = _height - y - 1;
+			ubyte[] a = data[(y * _pitch/2)..((y + 1) * _pitch/2)];
+			ubyte[] b = data[(y0 * _pitch/2)..((y0 + 1) * _pitch/2)];
+			swapRanges(a, b);
+		}
+	}
+}
+/**
+ * 2 Bit grayscale image data.
+ */
+public class MonochromeImageData2Bit : IImageData {
+	public static immutable double fYStepping = 1.0 / 3;
+	protected ubyte[]		data;
+	protected QuadArray		accessor;
+	protected uint			_width, _height, _pitch;
+	///CTOR
+	public this(ubyte[] data, uint width, uint height) @safe pure {
+		this.data = data;
+		this._width = width;
+		this._height = height;
+		_pitch = width;
+		_pitch += width % 4 ? 4 - width % 4 : 0;
+		accessor = QuadArray(data, _pitch * _height);
+	}
+	///CTOR without preexisting data
+	public this(uint width, uint height) @safe pure {
+		this._width = width;
+		this._height = height;
+		_pitch = _width;
+		_pitch += _width % 4 ? 4 - _width % 4 : 0;
+		data.length = _pitch * _height;
+		accessor = QuadArray(data, _pitch * _height);
+	}
+	///Returns the raw data
+	public @property QuadArray getData() @nogc @safe pure nothrow {
+		return accessor;
+	}
+	///Returns the raw data cast to ubyte
+	public ubyte[] raw() @safe pure {
+		return data;
+	}
+	///Returns the width of the image.
+	public @property uint width() @nogc @safe pure nothrow const {
+		return _width;
+	}
+	///Returns the height of the image.
+	public @property uint height() @nogc @safe pure nothrow const {
+		return _height;
+	}
+
+	public @property ubyte bitDepth() @nogc @safe pure nothrow const {
+		return 2;
+	}
+
+	public @property ubyte bitplanes() @nogc @safe pure nothrow const {
+		return 1;
+	}
+
+	public @property uint pixelFormat() @nogc @safe pure nothrow const {
+		return PixelFormat.Grayscale2Bit;
+	}
+
+	public IImageData convTo(uint format) @safe {
+		IImageData result;
+		void converter(OutputType)() @safe {
+			OutputType[] array;
+			array.reserve(_width * _height);
+			for (uint y ; y < _height ; y++) {
+				for (uint x ; x < _width ; x++) {
+					array ~= OutputType(readF(x, y));
+				}
+			}
+			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
+		}
+		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const ubyte val = opIndex(x, y);
+						mid[x,y] = cast(ushort)(val * 0b0101_0101_0101_0101);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.Grayscale8Bit:
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const ubyte val = opIndex(x, y);
+						mid[x,y] = cast(ubyte)(val * 0b0101_0101);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.YX88:
+				if(format & PixelFormat.BigEndian)
+					converter!(YA88BE);
+				else
+					converter!(YA88);
+				break;
+			case PixelFormat.RGB888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGB888BE);
+				else
+					converter!(RGB888);
+				break;
+			case PixelFormat.RGBX8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGBA8888BE);
+				else
+					converter!(RGBA8888);
+				break;
+			case PixelFormat.XRGB8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(ARGB8888BE);
+				else
+					converter!(ARGB8888);
+				break;
+			case PixelFormat.RGB565:
+				converter!(RGB565);
+				break;
+			case PixelFormat.RGBX5551:
+				converter!(RGBA5551);
+				break;
+			default:
+				throw new ImageFormatException("Format not supported");
+		}
+		return result;
+	}
+	public ARGB8888 read(uint x, uint y) @safe pure {
+		const ubyte val = opIndex(x,y);
+		return ARGB8888(val<<6 | val<<4 | val<<2 | val);
+	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		const ubyte val = opIndex(x,y);
+		return RGBA_f32(val * fYStepping);
+	}
+	public ubyte opIndex(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)];
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public ubyte opIndexAssign(ubyte val, uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)] = val;
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	///Flips the image horizontally
+	public void flipHorizontal() @safe pure {
+		for (uint y ; y < _height ; y++) {
+			for (uint x ; x < _width>>>1 ; x++) {
+				const ubyte tmp = opIndex(x, y);
+				opIndexAssign(opIndex(_width - x, y), x, y);
+				opIndexAssign(tmp, _width - x, y);
+			}
+		}
+	}
+	///Flips the image vertically
+	public void flipVertical() @safe pure {
+		import std.algorithm.mutation : swapRanges;
+		for (uint y ; y < _height / 2 ; y++) {
+			const uint y0 = _height - y - 1;
+			ubyte[] a = data[(y * _pitch/4)..((y + 1) * _pitch/4)];
+			ubyte[] b = data[(y0 * _pitch/4)..((y0 + 1) * _pitch/4)];
+			swapRanges(a, b);
+		}
+	}
+}
+/**
+ * Monochrome 1 bit access
+ */
+public class MonochromeImageData1Bit : IImageData {
+	protected ubyte[]		data;
+	protected BitArray		accessor;
+	protected uint			_width, _height, _pitch;
+	///CTOR
+	public this(ubyte[] data, uint _width, uint _height) @trusted pure {
+		this.data = data;
+		this._width = _width;
+		this._height = _height;
+		_pitch = _width;
+		_pitch += width % 8 ? 8 - width % 8 : 0;
+		accessor = BitArray(data, _pitch * _height);
+	}
+	///Returns the raw data
+	public @property BitArray getData() @nogc @safe pure nothrow {
+		return accessor;
+	}
+	///Returns the raw data cast to ubyte
+	public ubyte[] raw() @safe pure {
+		return data;
+	}
+	///Returns the width of the image.
+	public @property uint width() @nogc @safe pure nothrow const {
+		return _width;
+	}
+	///Returns the height of the image.
+	public @property uint height() @nogc @safe pure nothrow const {
+		return _height;
+	}
+
+	public @property ubyte bitDepth() @nogc @safe pure nothrow const {
+		return 1;
+	}
+
+	public @property ubyte bitplanes() @nogc @safe pure nothrow const {
+		return 1;
+	}
+
+	public @property uint pixelFormat() @nogc @safe pure nothrow const {
+		return PixelFormat.Grayscale1Bit;
+	}
+
+	public IImageData convTo(uint format) @safe {
+		IImageData result;
+		void converter(OutputType)() @safe {
+			OutputType[] array;
+			array.reserve(_width * _height);
+			for (uint y ; y < _height ; y++) {
+				for (uint x ; x < _width ; x++) {
+					array ~= OutputType(readF(x, y));
+				}
+			}
+			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
+		}
+		
+		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ushort)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ushort.fYStepping);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.Grayscale8Bit:
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ubyte)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ubyte.fYStepping);
+					}
+				}
+				result = mid;
+				break;
+			case PixelFormat.YX88:
+				if(format & PixelFormat.BigEndian)
+					converter!(YA88BE);
+				else
+					converter!(YA88);
+				break;
+			case PixelFormat.RGB888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGB888BE);
+				else
+					converter!(RGB888);
+				break;
+			case PixelFormat.RGBX8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(RGBA8888BE);
+				else
+					converter!(RGBA8888);
+				break;
+			case PixelFormat.XRGB8888:
+				if(format & PixelFormat.BigEndian)
+					converter!(ARGB8888BE);
+				else
+					converter!(ARGB8888);
+				break;
+			case PixelFormat.RGB565:
+				converter!(RGB565);
+				break;
+			case PixelFormat.RGBX5551:
+				converter!(RGBA5551);
+				break;
+			default:
+				throw new ImageFormatException("Format not supported");
+		}
+		return result;
+	}
+
+	public ARGB8888 read(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return opIndex(x, y) ? ARGB8888(255) : ARGB8888(0);
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return opIndex(x, y) ? RGBA_f32(1.0) : RGBA_f32(0.0);
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public bool opIndex(uint x, uint y) @trusted pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)];
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public ubyte opIndexAssign(bool val, uint x, uint y) @trusted pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)] = val;
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	///Flips the image horizontally
+	public void flipHorizontal() @safe pure {
+		for (uint y ; y < _height ; y++) {
+			for (uint x ; x < _width>>>1 ; x++) {
+				const bool tmp = opIndex(x, y);
+				opIndexAssign(opIndex(_width - x, y), x, y);
+				opIndexAssign(tmp, _width - x, y);
+			}
+		}
+	}
+	///Flips the image vertically
+	public void flipVertical() @safe pure {
+		import std.algorithm.mutation : swapRanges;
+		for (uint y ; y < _height / 2 ; y++) {
+			const uint y0 = _height - y - 1;
+			ubyte[] a = data[(y * _pitch/8)..((y + 1) * _pitch/8)];
+			ubyte[] b = data[(y0 * _pitch/8)..((y0 + 1) * _pitch/8)];
+			swapRanges(a, b);
+		}
+	}
+}
+/**
  * Indexed imagedata container for ubyte and ushort based formats
  */
 public class IndexedImageData (T) : IImageData {
@@ -434,11 +1123,19 @@ public class IndexedImageData (T) : IImageData {
 	public IPalette			palette;
 	protected uint			_width, _height;
 	///CTOR
-	public this(T[] data, IPalette palette, uint _width, uint _height) {
+	public this(T[] data, IPalette palette, uint width, uint height) @safe pure {
 		this.data = data;
 		this.palette = palette;
-		this._width = _width;
-		this._height = _height;
+		this._width = width;
+		this._height = height;
+	}
+	///CTOR with no preexisting image data
+	public this(IPalette palette, uint width, uint height) @safe pure {
+		//assert(data.length == _width * _height);
+		this.data.length = width * height;
+		this.palette = palette;
+		this._width = width;
+		this._height = height;
 	}
 	///Returns the raw data
 	public @property T[] getData() @nogc @safe pure nothrow {
@@ -480,15 +1177,6 @@ public class IndexedImageData (T) : IImageData {
 				array[i] = OutputType(palette.read(data[i]));
 			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
 		}
-		void monochrome8bitConverter() @safe {
-			ubyte[] array;
-			array.length = data.length;
-			for(int i ; i < data.length ; i++) {
-				const auto c = palette.read(data[i]);
-				array[i] = cast(ubyte)((c.r + c.g + c.b) / 3);
-			}
-			result = new ImageData!ubyte(array, _width, _height, format, getBitDepth(format));
-		}
 		void upconv(OutputType)() @safe {
 			OutputType[] array;
 			array.length = data.length;
@@ -500,8 +1188,29 @@ public class IndexedImageData (T) : IImageData {
 			case PixelFormat.Indexed16Bit:
 				upconv!ushort;
 				break;
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ushort)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ushort.fYStepping);
+					}
+				}
+				result = mid;
+				break;
 			case PixelFormat.Grayscale8Bit:
-				monochrome8bitConverter;
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ubyte)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ubyte.fYStepping);
+					}
+				}
+				result = mid;
 				break;
 			case PixelFormat.YX88:
 				if(format & PixelFormat.BigEndian)
@@ -542,6 +1251,10 @@ public class IndexedImageData (T) : IImageData {
 		if(x < _width && y < _height) return palette.read(data[x + (y * _width)]);
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return palette.readF(data[x + (y * _width)]);
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
 	public ref T opIndex(uint x, uint y) @safe pure {
 		if(x < _width && y < _height) return data[x + (y * _width)];
 		else throw new ImageBoundsException("Image is being read out of bounds!");
@@ -576,13 +1289,23 @@ public class IndexedImageData4Bit : IImageData {
 	public IPalette			palette;
 	protected uint			_width, _height, _pitch;
 	///CTOR
-	public this(ubyte[] data, IPalette _alette, uint _width, uint _height) {
+	public this(ubyte[] data, IPalette palette, uint width, uint height) @safe pure {
 		this.data = data;
 		this.palette = palette;
-		this._width = _width;
-		this._height = _height;
+		this._width = width;
+		this._height = height;
 		_pitch = _width + (_width % 2);
 		accessor = NibbleArray(data, _pitch * _height);
+	}
+	///CTOR with no preexisting image data
+	public this(IPalette palette, uint width, uint height) @safe pure {
+		//assert(data.length == _width * _height);
+		this._width = width;
+		this._height = height;
+		_pitch = _width + (_width % 2);
+		this.data.length = _pitch * _height;
+		accessor = NibbleArray(data, _pitch * _height);
+		this.palette = palette;
 	}
 	///Returns the raw data
 	public @property NibbleArray getData() @nogc @safe pure nothrow {
@@ -622,21 +1345,12 @@ public class IndexedImageData4Bit : IImageData {
 				array[i] = OutputType(palette.read(data[i]));
 			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
 		}
-		void monochrome8bitConverter() @safe {
-			ubyte[] array;
-			array.length = data.length;
-			for(int i ; i < data.length ; i++) {
-				const auto c = palette.read(data[i]);
-				array[i] = cast(ubyte)((c.r + c.g + c.b) / 3);
-			}
-			result = new ImageData!ubyte(array, _width, _height, format, getBitDepth(format));
-		}
 		void upconv(OutputType)() @safe {
-			OutputType[] array;
-			array.length = data.length;
-			for(int i ; i < data.length ; i++)
-				array[i] = data[i];
-			result = new IndexedImageData!OutputType(array, palette, _width, _height);
+			IndexedImageData!OutputType iid = new IndexedImageData!OutputType(palette, _width, _height);
+			for(int y ; y < _height ; y++)
+				for(int x ; x < _width ; x++)
+					iid[x, y] = opIndex(x, y);
+			result = iid;
 		}
 		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
 			case PixelFormat.Indexed16Bit:
@@ -645,8 +1359,29 @@ public class IndexedImageData4Bit : IImageData {
 			case PixelFormat.Indexed8Bit:
 				upconv!ubyte;
 				break;
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ushort)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ushort.fYStepping);
+					}
+				}
+				result = mid;
+				break;
 			case PixelFormat.Grayscale8Bit:
-				monochrome8bitConverter;
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ubyte)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ubyte.fYStepping);
+					}
+				}
+				result = mid;
 				break;
 			case PixelFormat.YX88:
 				if(format & PixelFormat.BigEndian)
@@ -684,15 +1419,19 @@ public class IndexedImageData4Bit : IImageData {
 		return result;
 	}
 	public ARGB8888 read(uint x, uint y) @safe pure {
-		if(x < _width && y < _height) return palette.read(data[x + (y * _pitch)]);
+		if(x < _width && y < _height) return palette.read(accessor[x + (y * _pitch)]);
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return palette.readF(accessor[x + (y * _pitch)]);
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
 	public ubyte opIndex(uint x, uint y) @safe pure {
-		if(x < _width && y < _height) return data[x + (y * _pitch)];
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)];
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
-	public ubyte opIndexAssign(uint x, uint y, ubyte val) @safe pure {
-		if(x < _width && y < _height) return data[x + (y * _pitch)] = val;
+	public ubyte opIndexAssign(ubyte val, uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)] = val;
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
 	///Flips the image horizontally
@@ -700,8 +1439,8 @@ public class IndexedImageData4Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const ubyte tmp = opIndex(x, y);
-				opIndexAssign(x, y, opIndex(_width - x, y));
-				opIndexAssign(_width - x, y, tmp);
+				opIndexAssign(opIndex(_width - x, y), x, y);
+				opIndexAssign(tmp, _width - x, y);
 			}
 		}
 	}
@@ -725,13 +1464,23 @@ public class IndexedImageData2Bit : IImageData {
 	public IPalette			palette;
 	protected uint			_width, _height, _pitch;
 	///CTOR
-	public this(ubyte[] data, IPalette palette, uint _width, uint _height) {
+	public this(ubyte[] data, IPalette palette, uint width, uint height) @safe pure {
 		this.data = data;
 		this.palette = palette;
-		this._width = _width;
-		this._height = _height;
-		_pitch = _width;
+		this._width = width;
+		this._height = height;
+		_pitch = width;
 		_pitch += width % 4 ? 4 - width % 4 : 0;
+		accessor = QuadArray(data, _pitch * _height);
+	}
+	///CTOR without preexisting data
+	public this(IPalette palette, uint width, uint height) @safe pure {
+		this.palette = palette;
+		this._width = width;
+		this._height = height;
+		_pitch = _width;
+		_pitch += _width % 4 ? 4 - _width % 4 : 0;
+		data.length = _pitch * _height;
 		accessor = QuadArray(data, _pitch * _height);
 	}
 	///Returns the raw data
@@ -772,21 +1521,12 @@ public class IndexedImageData2Bit : IImageData {
 				array[i] = OutputType(palette.read(data[i]));
 			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
 		}
-		void monochrome8bitConverter() @safe {
-			ubyte[] array;
-			array.length = data.length;
-			for(int i ; i < data.length ; i++) {
-				const auto c = palette.read(data[i]);
-				array[i] = cast(ubyte)((c.r + c.g + c.b) / 3);
-			}
-			result = new ImageData!ubyte(array, _width, _height, format, getBitDepth(format));
-		}
 		void upconv(OutputType)() @safe {
-			OutputType[] array;
-			array.length = data.length;
-			for(int i ; i < data.length ; i++)
-				array[i] = data[i];
-			result = new IndexedImageData!OutputType(array, palette, _width, _height);
+			IndexedImageData!OutputType iid = new IndexedImageData!OutputType(palette, _width, _height);
+			for(int y ; y < _height ; y++)
+				for(int x ; x < _width ; x++)
+					iid[x, y] = opIndex(x, y);
+			result = iid;
 		}
 		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
 			case PixelFormat.Indexed16Bit:
@@ -795,8 +1535,36 @@ public class IndexedImageData2Bit : IImageData {
 			case PixelFormat.Indexed8Bit:
 				upconv!ubyte;
 				break;
+			case PixelFormat.Indexed4Bit:
+				IndexedImageData4Bit iid = new IndexedImageData4Bit(palette, _width, _height);
+				for(int y ; y < _height ; y++)
+					for(int x ; x < _width ; x++)
+						iid[x, y] = opIndex(x, y);
+				result = iid;
+				break;
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ushort)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ushort.fYStepping);
+					}
+				}
+				result = mid;
+				break;
 			case PixelFormat.Grayscale8Bit:
-				monochrome8bitConverter;
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ubyte)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ubyte.fYStepping);
+					}
+				}
+				result = mid;
 				break;
 			case PixelFormat.YX88:
 				if(format & PixelFormat.BigEndian)
@@ -834,15 +1602,19 @@ public class IndexedImageData2Bit : IImageData {
 		return result;
 	}
 	public ARGB8888 read(uint x, uint y) @safe pure {
-		if(x < _width && y < _height) return palette.read(data[x + (y * _pitch)]);
+		if(x < _width && y < _height) return palette.read(accessor[x + (y * _pitch)]);
+		else throw new ImageBoundsException("Image is being read out of bounds!");
+	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return palette.readF(accessor[x + (y * _pitch)]);
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
 	public ubyte opIndex(uint x, uint y) @safe pure {
-		if(x < _width && y < _height) return data[x + (y * _pitch)];
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)];
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
-	public ubyte opIndexAssign(uint x, uint y, ubyte val) @safe pure {
-		if(x < _width && y < _height) return data[x + (y * _pitch)] = val;
+	public ubyte opIndexAssign(ubyte val, uint x, uint y) @safe pure {
+		if(x < _width && y < _height) return accessor[x + (y * _pitch)] = val;
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
 	///Flips the image horizontally
@@ -850,8 +1622,8 @@ public class IndexedImageData2Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const ubyte tmp = opIndex(x, y);
-				opIndexAssign(x, y, opIndex(_width - x, y));
-				opIndexAssign(_width - x, y, tmp);
+				opIndexAssign(opIndex(_width - x, y),x, y);
+				opIndexAssign(tmp, _width - x, y);
 			}
 		}
 	}
@@ -875,7 +1647,7 @@ public class IndexedImageData1Bit : IImageData {
 	public IPalette			palette;
 	protected uint			_width, _height, _pitch;
 	///CTOR
-	public this(ubyte[] data, IPalette palette, uint _width, uint _height) {
+	public this(ubyte[] data, IPalette palette, uint _width, uint _height) @trusted pure {
 		this.data = data;
 		this.palette = palette;
 		this._width = _width;
@@ -922,28 +1694,57 @@ public class IndexedImageData1Bit : IImageData {
 				array[i] = OutputType(palette.read(data[i]));
 			result = new ImageData!OutputType(array, _width, _height, format, getBitDepth(format));
 		}
-		void monochrome8bitConverter() @safe {
-			ubyte[] array;
-			array.length = data.length;
-			for(int i ; i < data.length ; i++) {
-				const auto c = palette.read(data[i]);
-				array[i] = cast(ubyte)((c.r + c.g + c.b) / 3);
-			}
-			result = new ImageData!ubyte(array, _width, _height, format, getBitDepth(format));
-		}
 		void upconv(OutputType)() @safe {
-			OutputType[] array;
-			array.length = data.length;
-			for(int i ; i < data.length ; i++)
-				array[i] = data[i];
-			result = new IndexedImageData!OutputType(array, palette, _width, _height);
+			IndexedImageData!OutputType iid = new IndexedImageData!OutputType(palette, _width, _height);
+			for(int y ; y < _height ; y++)
+				for(int x ; x < _width ; x++)
+					iid[x, y] = opIndex(x, y);
+			result = iid;
 		}
 		switch (format & ~(PixelFormat.BigEndian | PixelFormat.ValidAlpha)) {
 			case PixelFormat.Indexed16Bit:
 				upconv!ushort;
 				break;
+			case PixelFormat.Indexed8Bit:
+				upconv!ubyte;
+				break;
+			case PixelFormat.Indexed4Bit:
+				IndexedImageData4Bit iid = new IndexedImageData4Bit(palette, _width, _height);
+				for(int y ; y < _height ; y++)
+					for(int x ; x < _width ; x++)
+						iid[x, y] = opIndex(x, y) ? 0x01 : 0x00;
+				result = iid;
+				break;
+			case PixelFormat.Indexed2Bit:
+				IndexedImageData2Bit iid = new IndexedImageData2Bit(palette, _width, _height);
+				for(int y ; y < _height ; y++)
+					for(int x ; x < _width ; x++)
+						iid[x, y] = opIndex(x, y) ? 0x01 : 0x00;
+				result = iid;
+				break;
+			case PixelFormat.Grayscale16Bit:
+				ushort[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ushort mid = new MonochromeImageData!ushort(datastream, _width, _height, format, 16);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ushort)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ushort.fYStepping);
+					}
+				}
+				result = mid;
+				break;
 			case PixelFormat.Grayscale8Bit:
-				monochrome8bitConverter;
+				ubyte[] datastream;
+				datastream.length = _width * _height;
+				MonochromeImageData!ubyte mid = new MonochromeImageData!ubyte(datastream, _width, _height, format, 8);
+				for (int y ; y < _height ; y++) {
+					for (int x ; x < _width ; x++) {
+						const RGBA_f32 pixel = readF(x,y);
+						mid[x,y] = cast(ubyte)((pixel.fR * 0.2125 + pixel.fG * 0.7154 + pixel.fB * 0.0721) / MonochromeImageData!ubyte.fYStepping);
+					}
+				}
+				result = mid;
 				break;
 			case PixelFormat.YX88:
 				if(format & PixelFormat.BigEndian)
@@ -982,14 +1783,16 @@ public class IndexedImageData1Bit : IImageData {
 	}
 
 	public ARGB8888 read(uint x, uint y) @safe pure {
-		if(x < _width && y < _height) return palette.read(opIndex(x, y));
-		else throw new ImageBoundsException("Image is being read out of bounds!");
+		return palette.read(opIndex(x, y));
+	}
+	public RGBA_f32 readF(uint x, uint y) @safe pure {
+		return palette.readF(opIndex(x, y));
 	}
 	public bool opIndex(uint x, uint y) @trusted pure {
 		if(x < _width && y < _height) return accessor[x + (y * _pitch)];
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
-	public bool opIndexAssign(uint x, uint y, bool val) @trusted pure {
+	public ubyte opIndexAssign(bool val, uint x, uint y) @trusted pure {
 		if(x < _width && y < _height) return accessor[x + (y * _pitch)] = val;
 		else throw new ImageBoundsException("Image is being read out of bounds!");
 	}
@@ -998,8 +1801,8 @@ public class IndexedImageData1Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const bool tmp = opIndex(x, y);
-				opIndexAssign(x, y, opIndex(_width - x, y));
-				opIndexAssign(_width - x, y, tmp);
+				opIndexAssign(opIndex(_width - x, y), x, y);
+				opIndexAssign(tmp, _width - x, y);
 			}
 		}
 	}

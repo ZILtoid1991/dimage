@@ -20,6 +20,28 @@ void stringCpy(CR)(ref CR target, string input) {
 	}
 }
 /**
+ * Converts a Big Endian stream to native.
+ */
+T[] bigEndianStreamToNative(T)(T[] source) @nogc @safe pure nothrow {
+	version (LittleEndian) {
+		import std.bitmanip : swapEndian;
+		foreach(ref T elem ; source) 
+			elem = swapEndian(elem);
+	}
+	return source;
+}
+/**
+ * Converts a native stream to Big Endian.
+ */
+T[] nativeStreamToBigEndian(T)(T[] source) @nogc @safe pure nothrow {
+	version (LittleEndian) {
+		import std.bitmanip : swapEndian;
+		foreach(ref T elem ; source) 
+			elem = swapEndian(elem);
+	}
+	return source;
+}
+/**
  * Adam7 deinterlacing algorithm
  */
 ubyte[] adam7(ubyte[] input, size_t bytedepth) {

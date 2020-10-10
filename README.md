@@ -22,8 +22,10 @@ sacrifice of easy scanline accessing.
 * Compression and decompression through phobos' etc.c.zlib.
 * Output mostly works. Certain ancillary chunks generate bad checksums on writing, which might not be liked by certain readers.
 * No interlace support yet.
-* Basic processing is fully supported, unsupported chunks are stored as extra embedded data.
-* Currently truecolor images are only supported with up to 8 bit per channel.
+* Basic processing is fully supported, unsupported chunks are stored as extra embedded data. Background indexes, transparencies 
+(including indexed) are supported. Embedded text support, and APNG extension support will be added.
+* Filtering and defiltering works. Note that there might be a few bugs with the filters (please send me examples if you encounter
+one), and currently there's no automatic filtering.
 
 ## Windows Bitmap (bmp)
 
@@ -107,6 +109,7 @@ foreach(colorIndex ; pal)
 
 ## Planned formats
 
+* MNG
 * TIFF (requires LZW and JPEG codec)
 * GIF (requires LZW)
 * JPEG (requires codec)

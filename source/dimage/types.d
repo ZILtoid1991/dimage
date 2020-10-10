@@ -22,18 +22,25 @@ struct RGBA_f32 {
 	float	fB;
 	float	fA;
 	///Standard CTOR
-	this(float fR, float fG, float fB, float fA) {
+	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {
 		this.fR = fR;
 		this.fG = fG;
 		this.fB = fB;
 		this.fA = fA;
 	}
 	///Conversion CTOR
-	this(ColorType)(ColorType orig) {
+	this(ColorType)(ColorType orig) @safe @nogc pure nothrow {
 		this.fR = orig.fR;
 		this.fG = orig.fG;
 		this.fB = orig.fB;
 		this.fA = orig.fA;
+	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) @safe @nogc pure nothrow {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
+		this.fA = fA;
 	}
 }
 /**
@@ -110,39 +117,46 @@ struct ARGB8888Templ (Endianness byteOrder = Endianness.Little) {
 		return fA;
 	}
 	///Creates a standard pixel representation out from a 4 element array
-	this(ubyte[4] bytes) @safe @nogc pure{
+	this(ubyte[4] bytes) @safe @nogc pure nothrow {
 		this.bytes = bytes;
 	}
 	///Creates a standard pixel representation out from 4 separate values
-	this(ubyte r, ubyte g, ubyte b, ubyte a) @safe @nogc pure {
+	this(ubyte r, ubyte g, ubyte b, ubyte a) @safe @nogc pure nothrow {
 		this.b = b;
 		this.g = g;
 		this.r = r;
 		this.a = a;
 	}
 	///Standard CTOR
-	this(float fR, float fG, float fB, float fA) {
+	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {
 		this.fR = fR;
 		this.fG = fG;
 		this.fB = fB;
 		this.fA = fA;
 	}
 	///Template for pixel conversion
-	this(ColorType)(ColorType orig) @safe @nogc pure {
+	this(ColorType)(ColorType orig) @safe @nogc pure nothrow {
 		this.fB = orig.fB;
 		this.fG = orig.fG;
 		this.fR = orig.fR;
 		this.fA = orig.fA;
 	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) @safe @nogc pure nothrow {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
+		this.fA = fA;
+	}
 	///Conversion from 8bit monochrome
-	this(ubyte p) @safe @nogc pure {
+	this(ubyte p) @safe @nogc pure nothrow {
 		this.b = p;
 		this.g = p;
 		this.r = p;
 		this.a = 0xFF;
 	}
 	///String representation of this struct
-	string toString() @safe pure {
+	string toString() const {
 		import std.conv : to;
 		return to!string(r) ~ "," ~ to!string(g) ~ "," ~ to!string(b) ~ "," ~ to!string(a);
 	}
@@ -238,21 +252,28 @@ struct RGBA8888Templ (Endianness byteOrder = Endianness.Little) {
 		bytes[3] = a;
 	}
 	///Standard CTOR
-	this(float fR, float fG, float fB, float fA) {
+	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {
 		this.fR = fR;
 		this.fG = fG;
 		this.fB = fB;
 		this.fA = fA;
 	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) @safe @nogc pure nothrow {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
+		this.fA = fA;
+	}
 	///Template for pixel conversion
-	this(ColorType)(ColorType orig) @safe @nogc pure {
+	this(ColorType)(ColorType orig) @safe @nogc pure nothrow {
 		this.fB = orig.fB;
 		this.fG = orig.fG;
 		this.fR = orig.fR;
 		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
-	this(ubyte p) @safe @nogc pure {
+	this(ubyte p) @safe @nogc pure nothrow {
 		this.b = p;
 		this.g = p;
 		this.r = p;
@@ -323,19 +344,23 @@ struct YA88Templ (Endianness byteOrder = Endianness.Little) {
 		this.a = a;
 	}
 	///Standard CTOR
-	///Uses mathematical average to calculate the new values
-	this(float fR, float fG, float fB, float fA) {
-		this.fB = (fB + fG + fR) / 3;
+	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {
+		this.fB = 0.2125 * fR + 0.7154 * fG + 0.0721 * fB;
 		this.fA = fA;
 	}
 	///Template for pixel conversion
 	///Uses mathematical average to calculate the new values
-	this(ColorType)(ColorType orig) @safe @nogc pure {
-		this.fB = (orig.fB + orig.fG + orig.fR) / 3;
+	this(ColorType)(ColorType orig) @safe @nogc pure nothrow {
+		this.fB = 0.2125 * orig.fR + 0.7154 * orig.fG + 0.0721 * orig.fB;
 		this.fA = orig.fA;
 	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) @safe @nogc pure nothrow {
+		this.fR = fY;
+		this.fA = fA;
+	}
 	///Conversion from 8bit monochrome
-	this(ubyte p) @safe @nogc pure {
+	this(ubyte p) @safe @nogc pure nothrow {
 		this.y = p;
 		this.a = 0xFF;
 	}
@@ -361,6 +386,113 @@ struct YA88Templ (Endianness byteOrder = Endianness.Little) {
 	nothrow @safe @nogc @property pure ubyte g() const { return y; }
 	/// pseudo-blue (output only)
 	nothrow @safe @nogc @property pure ubyte b() const { return y; }
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return true;
+	}
+}
+alias YA16_16 = YA16_16Templ!(Endianness.Little);
+alias YA16_16BE = YA16_16Templ!(Endianness.Big);
+/**
+ * For monochrome images with a single channel
+ */
+struct YA16_16Templ (Endianness byteOrder = Endianness.Little) {
+	union{
+		uint		base;		/// direct access
+		ushort[2]	channels;	/// individual access
+	}
+	static immutable double fRStepping = 1.0 / 65_535;	///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 65_535;	///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 65_535;	///Floating-point blue stepping
+	static immutable double fAStepping = 1.0 / 65_535;	///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return y * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return y * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return y * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return a * fAStepping;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		y = cast(ubyte)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		y = cast(ubyte)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		y = cast(ubyte)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		a = cast(ubyte)(val / fAStepping);
+		return fA;
+	}
+	///Standard CTOR
+	this(ushort y, ushort a) @safe @nogc pure nothrow {
+		this.y = y;
+		this.a = a;
+	}
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {
+		this.fB = 0.2125 * fR + 0.7154 * fG + 0.0721 * fB;
+		this.fA = fA;
+	}
+	///Template for pixel conversion
+	///Uses mathematical average to calculate the new values
+	this(ColorType)(ColorType orig) @safe @nogc pure nothrow {
+		this.fB = 0.2125 * orig.fR + 0.7154 * orig.fG + 0.0721 * orig.fB;
+		this.fA = orig.fA;
+	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) @safe @nogc pure nothrow {
+		this.fR = fY;
+		this.fA = fA;
+	}
+	///Conversion from 8bit monochrome
+	this(ubyte p) @safe @nogc pure nothrow {
+		this.y = p;
+		this.a = 0xFF;
+	}
+	/// luminance
+	nothrow @safe @nogc @property pure ref auto y() inout { 
+		static if(byteOrder == Endianness.Big) {
+			return channels[1]; 
+		} else {
+			return channels[0]; 
+		}
+	}
+	/// alpha
+	nothrow @safe @nogc @property pure ref auto a() inout { 
+		static if(byteOrder == Endianness.Big) {
+			return channels[0]; 
+		} else {
+			return channels[1]; 
+		}
+	}
+	/// pseudo-red (output only)
+	nothrow @safe @nogc @property pure ushort r() const { return y; }
+	/// pseudo-green (output only)
+	nothrow @safe @nogc @property pure ushort g() const { return y; }
+	/// pseudo-blue (output only)
+	nothrow @safe @nogc @property pure ushort b() const { return y; }
 	///Returns true if type has alpha channel support
 	static bool hasAlphaChannelSupport() {
 		return true;
@@ -431,10 +563,17 @@ struct RGBA5551 {
 		_a = a != 0;
 	}
 	///Standard CTOR
-	this(float fR, float fG, float fB, float fA) {
+	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {
 		this.fR = fR;
 		this.fG = fG;
 		this.fB = fB;
+		this.fA = fA;
+	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) @safe @nogc pure nothrow {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
 		this.fA = fA;
 	}
 	///Template for pixel conversion
@@ -445,7 +584,7 @@ struct RGBA5551 {
 		this.fA = orig.fA;
 	}
 	///Conversion from 8bit monochrome
-	this(ubyte p) @safe @nogc pure {
+	this(ubyte p) @safe @nogc pure nothrow {
 		_b = p>>3;
 		_g = p>>3;
 		_r = p>>3;
@@ -526,21 +665,28 @@ struct RGB565 {
 		_b = b>>3;
 	}
 	///Standard CTOR
-	this(float fR, float fG, float fB, float fA) {
+	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {
 		this.fR = fR;
 		this.fG = fG;
 		this.fB = fB;
 		this.fA = fA;
 	}
 	///Template for pixel conversion
-	this(ColorType)(ColorType orig) @safe @nogc pure {
+	this(ColorType)(ColorType orig) @safe @nogc pure nothrow {
 		this.fB = orig.fB;
 		this.fG = orig.fG;
 		this.fR = orig.fR;
 		this.fA = orig.fA;
 	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) @safe @nogc pure nothrow {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
+		this.fA = fA;
+	}
 	///Conversion from 8bit monochrome
-	this(ubyte p) @safe @nogc pure {
+	this(ubyte p) @safe @nogc pure nothrow {
 		_b = p>>3;
 		_g = p>>2;
 		_r = p>>3;
@@ -636,6 +782,13 @@ align(1) struct RGB888Templ (Endianness byteOrder = Endianness.Little) {
 		this.fB = fB;
 		this.fA = fA;
 	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
+		this.fA = fA;
+	}
 	///Template for pixel conversion
 	this(ColorType)(ColorType orig) @safe @nogc pure {
 		this.fB = orig.fB;
@@ -662,7 +815,6 @@ alias RGB16_16_16 = RGB16_16_16Templ!(Endianness.Little);
 alias RGB16_16_16BE = RGB16_16_16Templ!(Endianness.Big);
 /**
  * 48 bit RGB colorspace with 16 bit per channel.
- * Does not easily convert to 8 bit at the moment.
  */
 align(2) public struct RGB16_16_16Templ (Endianness byteOrder = Endianness.Little) {
 	ushort[3] bytes;				///individual access
@@ -737,6 +889,116 @@ align(2) public struct RGB16_16_16Templ (Endianness byteOrder = Endianness.Littl
 		this.fB = fB;
 		this.fA = fA;
 	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
+		this.fA = fA;
+	}
+	///Template for pixel conversion
+	this(ColorType)(ColorType orig) @safe @nogc pure {
+		this.fB = orig.fB;
+		this.fG = orig.fG;
+		this.fR = orig.fR;
+		this.fA = orig.fA;
+	}
+	///Returns true if type has alpha channel support
+	static bool hasAlphaChannelSupport() {
+		return false;
+	}
+}
+alias RGBA16_16_16_16 = RGBA16_16_16_16Templ!(Endianness.Little);
+alias RGBA16_16_16_16BE = RGBA16_16_16_16Templ!(Endianness.Big);
+/**
+ * 48 bit RGB colorspace with 16 bit per channel.
+ */
+align(2) public struct RGBA16_16_16_16Templ (Endianness byteOrder = Endianness.Little) {
+	ushort[4] bytes;				///individual access
+	static if (byteOrder == Endianness.Big) {
+		///red
+		nothrow @safe @nogc @property pure ref auto r() inout { return bytes[0]; }
+		///green
+		nothrow @safe @nogc @property pure ref auto g() inout { return bytes[1]; }
+		///blue
+		nothrow @safe @nogc @property pure ref auto b() inout { return bytes[2]; }
+		///alpha
+		nothrow @safe @nogc @property pure ref auto a() inout { return bytes[3]; }
+	} else {
+		///red
+		nothrow @safe @nogc @property pure ref auto r() inout { return bytes[3]; }
+		///green
+		nothrow @safe @nogc @property pure ref auto g() inout { return bytes[2]; }
+		///blue
+		nothrow @safe @nogc @property pure ref auto b() inout { return bytes[1]; }
+		///alpha
+		nothrow @safe @nogc @property pure ref auto a() inout { return bytes[0]; }
+	}
+	static immutable double fRStepping = 1.0 / 65_535;///Floating-point red stepping
+	static immutable double fGStepping = 1.0 / 65_535;///Floating-point green stepping
+	static immutable double fBStepping = 1.0 / 65_535;///Floating-point blue stepping
+	static immutable double fAStepping = 1.0 / 65_535;///Floating-point alpha stepping
+	///Returns the red channel as a normalized floating-point value
+	@property float fR() @safe @nogc pure nothrow const {
+		return r * fRStepping;
+	}
+	///Returns the green channel as a normalized floating-point value
+	@property float fG() @safe @nogc pure nothrow const {
+		return g * fGStepping;
+	}
+	///Returns the blue channel as a normalized floating-point value
+	@property float fB() @safe @nogc pure nothrow const {
+		return b * fBStepping;
+	}
+	///Returns the alpha channel as a normalized floating-point value
+	@property float fA() @safe @nogc pure nothrow const {
+		return a * fAStepping;
+	}
+	///Sets the red value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fR(float val) @safe @nogc pure nothrow {
+		r = cast(ushort)(val / fRStepping);
+		return fR;
+	}
+	///Sets the green value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fG(float val) @safe @nogc pure nothrow {
+		g = cast(ushort)(val / fGStepping);
+		return fG;
+	}
+	///Sets the blue value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fB(float val) @safe @nogc pure nothrow {
+		b = cast(ushort)(val / fBStepping);
+		return fB;
+	}
+	///Sets the alpha value channel a normalized floating-point value
+	///Returns the new requantized value
+	@property float fA(float val) @safe @nogc pure nothrow {
+		a = cast(ushort)(val / fAStepping);
+		return fB;
+	}
+	///Standard CTOR
+	this(ushort r, ushort g, ushort b, ushort a) pure nothrow @safe @nogc {
+		this.r = r;
+		this.g = g;
+		this.b = b;
+		this.a = a;
+	}
+	///Standard CTOR
+	this(float fR, float fG, float fB, float fA) {
+		this.fR = fR;
+		this.fG = fG;
+		this.fB = fB;
+		this.fA = fA;
+	}
+	///Conversion CTOR from monochrome
+	this(float fY, float fA = 1.0) {
+		this.fR = fY;
+		this.fG = fY;
+		this.fB = fY;
+		this.fA = fA;
+	}
 	///Template for pixel conversion
 	this(ColorType)(ColorType orig) @safe @nogc pure {
 		this.fB = orig.fB;
@@ -765,15 +1027,22 @@ enum PixelFormat : uint {
 	RGBA5551		=	RGBX5551 | ValidAlpha,
 	RGB565			=	0x2,
 	RGB888			=	0x20,
-	Grayscale8Bit	=	0x30,
-	Grayscale4Bit	=	0x31,
+	Grayscale1Bit	=	0x30,
+	Grayscale2Bit	=	0x31,
+	Grayscale4Bit	=	0x32,
+	Grayscale8Bit	=	0x33,
+	Grayscale16Bit	=	0x34,
 	YX88			=	0x3A,
 	YA88			=	YX88 | ValidAlpha,
+	YX16_16			=	0x3B,
+	YA16_16			=	YX16_16 | ValidAlpha,
 	RGBX8888		=	0x40,
 	RGBA8888		=	RGBX8888 | ValidAlpha,
 	XRGB8888		=	0x41,
 	ARGB8888		=	XRGB8888 | ValidAlpha,
 	RGB16_16_16		=	0x60,
+	RGBX16_16_16_16	=	0x61,
+	RGBA16_16_16_16	=	RGBX16_16_16_16 | ValidAlpha,
 	RGBX_f32		=	0x101,
 	RGBA_f32		=	RGBX_f32 | ValidAlpha,
 	Indexed1Bit		=	0xF00,
