@@ -24,6 +24,7 @@ sacrifice of easy scanline accessing.
 * No interlace support yet.
 * Basic processing is fully supported, unsupported chunks are stored as extra embedded data. Background indexes, transparencies 
 (including indexed) are supported. Embedded text support, and APNG extension support will be added.
+* Most common formats are supported up to 16 bits.
 * Filtering and defiltering works. Note that there might be a few bugs with the filters (please send me examples if you encounter
 one), and currently there's no automatic filtering.
 
@@ -104,8 +105,8 @@ foreach(colorIndex ; pal)
 
 # Planned features
 
-* Better memory safety.
-* Use of floating points for conversion.
+* Better memory safety. (Partly done)
+* Use of floating points for conversion. (Mostly done)
 
 ## Planned formats
 
