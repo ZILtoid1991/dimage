@@ -42,6 +42,21 @@ T[] nativeStreamToBigEndian(T)(T[] source) @nogc @safe pure nothrow {
 	return source;
 }
 /**
+ * Separates the first string out from the datastream.
+ */
+string getFirstString(ref ubyte[] stream) @safe pure {
+	string result;
+	for (size_t i ; i < stream.length ; i++) {
+		if (stream[i] == 0) {
+			ubyte[] slice = stream[0..i];
+			result = reinterpretCast!char(slice).idup;
+			stream = stream[i+1..$];
+			return result;
+		}
+	}
+	return result;
+}
+/**
  * Adam7 deinterlacing algorithm
  */
 ubyte[] adam7(ubyte[] input, size_t bytedepth) {

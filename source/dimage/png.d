@@ -20,13 +20,12 @@ import core.stdc.stdint;
 import bitleveld.datatypes;
 import dimage.util;
 import std.conv : to;
-import std.traits : FieldNameTuple;
 /**
  * Implements the Portable Network Graphics file format as a class.
  *
  * Supports APNG extenstions.
  */
-public class PNG : Image, MultiImage{
+public class PNG : Image, MultiImage, CustomImageMetadata {
 	///Chunk initializer IDs.
 	static enum ChunkInitializers : char[4] {
 		Header				=	"IHDR",		///Standard, for header, before image data
@@ -44,17 +43,28 @@ public class PNG : Image, MultiImage{
 		Time				=	"tIME",		///Last modification date
 		Transparency		=	"tRNS",		///Transparency
 		CompTextData		=	"zTXt",		///Compressed textual data
+		IntTextData			=	"iTXt",		///International textual data
 		//Chunks for APNG:
 		AnimationControl	=	"acTL",		///Animation control chunk
 		FrameControl		=	"fcTL",		///Frame control chunk
 		FrameData			=	"fDAT",		///Frame data
 	}
+	/**
+	 * Defines standard PNG filter types.
+	 */
 	static enum FilterType : ubyte {
 		None,
 		Sub,
 		Up,
 		Average,
 		Paeth,
+	}
+	/**
+	 * Defines the flags in the flag field.
+	 */
+	static enum Flags : uint {
+		HasTransparency		=	0x01,
+		HasAPNGext			=	0x02,
 	}
 	//static enum HEADER_INIT = "IHDR";		///Initializes header in the file
 	//static enum PALETTE_INIT = "PLTE";		///Initializes palette in the file
@@ -104,14 +114,14 @@ public class PNG : Image, MultiImage{
 		/**
 		 * Converts the struct to little endian on systems that need them.
 		 */
-		public void bigEndianToNative(){
+		public void bigEndianToNative() {
 			version(LittleEndian)
 				dataLength = swapEndian(dataLength);
 		}
 		/**
 		 * Returns a copy of the struct that is in big endian.
 		 */
-		public Chunk nativeToBigEndian(){
+		public Chunk nativeToBigEndian() {
 			version(LittleEndian)
 				return Chunk(swapEndian(dataLength), identifier);
 			else
@@ -122,7 +132,7 @@ public class PNG : Image, MultiImage{
 	 * Represents the possible types for PNG
 	 * While bitmasking could be used, not every combination are valid
 	 */
-	enum ColorType : ubyte{
+	enum ColorType : ubyte {
 		Greyscale			=	0,
 		TrueColor			=	2,
 		Indexed				=	3,
@@ -174,12 +184,23 @@ public class PNG : Image, MultiImage{
 		}
 	}
 	/**
+	 * Contains textual metadata embedded into the file.
+	 */
+	struct Text {
+		string		keyword;			///The keyword, which the textual metadata is associated with. (Max 79 characters)
+		string		text;				///The text itself.
+		string		lang;				///Language in case of international textual data.
+		string		ikeyword;			///Translated keyword if any.
+		ubyte		compression;		///Compression method flag. (should be zero)
+		ubyte		isCompressed;		///1 if field is compressed, 0 otherwise.
+	}
+	/**
 	 * Animation control chunk.
 	 * If found in a PNG file, it means it has the APNG extensions.
 	 */
 	struct AnimationControl {
-		uint	numFrames;			///Number of animation frames.
-		uint	numPlays;			///Number of repeats (0 means infinite loop).
+		uint		numFrames;			///Number of animation frames.
+		uint		numPlays;			///Number of repeats (0 means infinite loop).
 		/**
 		 * Converts the struct to little endian on systems that need them.
 		 */
@@ -189,12 +210,82 @@ public class PNG : Image, MultiImage{
 				numPlays = swapEndian(numPlays);
 			}
 		}
+		/**
+		 * Converts the struct to big endian for storage.
+		 */
+		public void nativeToBigEndian() @safe @nogc pure nothrow {
+			version(LittleEndian){
+				numFrames = swapEndian(numFrames);
+				numPlays = swapEndian(numPlays);
+			}
+		}
+	}
+	/**
+	 * Frame disposal operator.
+	 */
+	enum FrameDisposalOperator : ubyte {
+		None,				///no disposal is done on this frame before rendering the next; the contents of the output buffer are left as is.
+		Background,			///the frame's region of the output buffer is to be cleared to fully transparent black before rendering the next frame.
+		Previous,			///the frame's region of the output buffer is to be reverted to the previous contents before rendering the next frame.
+	}
+	/**
+	 * Frame blend operator.
+	 */
+	enum FrameBlendOperator : ubyte {
+		Source,				///all color components of the frame, including alpha, overwrite the current contents of the frame's output buffer region
+		Over,				///the frame should be composited onto the output buffer based on its alpha, using a simple OVER operation as described in the "Alpha Channel Processing" section of the PNG specification
+	}
+	/**
+	 * Frame control chunk.
+	 */
+	struct FrameControl {
+		uint		seqNum;
+		uint		width;
+		uint		height;
+		uint		xOffset;
+		uint		yOffset;
+		ushort		delayNum;
+		ushort		delayDen;
+		FrameDisposalOperator	disposeOp;
+		FrameBlendOperator		blendOp;
+		/**
+		 * Converts the struct to little endian on systems that need them.
+		 */
+		public void bigEndianToNative() @safe @nogc pure nothrow {
+			version(LittleEndian){
+				seqNum = swapEndian(seqNum);
+				width = swapEndian(width);
+				height = swapEndian(height);
+				xOffset = swapEndian(xOffset);
+				yOffset = swapEndian(yOffset);
+				delayNum = swapEndian(delayNum);
+				delayDen = swapEndian(delayDen);
+			}
+		}
+		/**
+		 * Converts the struct to big endian for storage.
+		 */
+		public void nativeToBigEndian() @safe @nogc pure nothrow {
+			version(LittleEndian){
+				seqNum = swapEndian(seqNum);
+				width = swapEndian(width);
+				height = swapEndian(height);
+				xOffset = swapEndian(xOffset);
+				yOffset = swapEndian(yOffset);
+				delayNum = swapEndian(delayNum);
+				delayDen = swapEndian(delayDen);
+			}
+		}
 	}
 	protected Header		header;
+	protected IImageData	baseImage;				///Base image if APNG chunks present.
+	protected IImageData[]	frames;					///Extra frames for the APNG extension
 	public EmbeddedData[]	ancillaryChunks;		///Stores ancilliary chunks that are not essential for image processing
 	public ubyte[]			filterBytes;			///Filterbytes for each scanline
+	public ubyte[][]		frameFilterBytes;		///Filterbytes for each frame (might be jagged)
+	public Text[]			textData;				///Textual metadata
 	protected int			bkgIndex = -1;			///Background index
-	protected uint			flags;					///Stores property flags (currently only if transparency exists or not)
+	protected uint			flags;					///Stores property flags
 	protected RGB16_16_16BE	bkgColor;				///Background color
 	protected RGB16_16_16BE	trns;					///Transparency
 	protected size_t		pitch;
@@ -230,6 +321,14 @@ public class PNG : Image, MultiImage{
 	 * Currently interlaced mode is unsupported.
 	 */
 	static PNG load(F = std.stdio.File, ChecksumPolicy chksmTest = ChecksumPolicy.DisableAncillary)(ref F file){
+		class PNGImgDecoder {
+			zlib.z_stream strm;
+			ubyte[] output;
+			ubyte[]	filterBytes;
+			~this() {
+				zlib.inflateEnd(&strm);
+			}
+		}
 		//import std.zlib : UnCompress;
 		RGB16_16_16BE beToNative(RGB16_16_16BE val) {
 			version(LittleEndian) {
@@ -239,6 +338,43 @@ public class PNG : Image, MultiImage{
 			}
 			return val;
 		}
+		///Decompresses a text chunk.
+		///`extstrm` is used in case of an error during decompression. It'll fold it, to avoid memory leakage issues.
+		string decompressText(ubyte[] src, zlib.z_streamp extstrm) {
+			import std.math : nextPow2;
+			ubyte[] output, workpad;
+			zlib.z_stream strm;
+			strm.zalloc = null;
+			strm.zfree = null;
+			strm.opaque = null;
+			int ret = zlib.inflateInit(&strm);
+			strm.next_in = src.ptr;
+			strm.avail_in = cast(uint)src.length;
+			output.length = nextPow2(src.length);
+			strm.next_out = output.ptr;
+			strm.avail_out = cast(uint)output.length;
+			while (strm.avail_in) {
+				ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
+				if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
+					version(unittest) std.stdio.writeln(ret);
+					zlib.inflateEnd(&strm);
+					zlib.inflateEnd(extstrm);
+					throw new ImageFileException("Text data decompression error");
+				}
+				if (!strm.avail_out) {//decompress more data
+					strm.next_out = output.ptr;
+					strm.avail_out = cast(uint)output.length;
+					workpad ~= output;
+				}
+			}
+			workpad ~= output;
+			workpad.length = cast(size_t)strm.total_out;
+			zlib.inflateEnd(&strm);
+			return reinterpretCast!char(workpad).idup;
+		}
+		/+ubyte[] decompressAnimChunk(ubyte[] src, AnimChunk context) {
+			
+		}+/
 		PNG result = new PNG();
 		bool iend;
 		EmbeddedData.DataPosition pos = EmbeddedData.DataPosition.BeforePLTE;
@@ -354,6 +490,38 @@ public class PNG : Image, MultiImage{
 							break;
 						default:
 							break;
+					}
+					break;
+				case ChunkInitializers.TextData:
+					ubyte[] arr = readBuffer.dup;
+					string keyword = getFirstString(arr);
+					Text t = Text(keyword, reinterpretCast!char(arr).idup, null, null, 0, 0);
+					result.textData ~= t;
+					break;
+				case ChunkInitializers.CompTextData:
+					ubyte[] arr = readBuffer.dup;
+					string keyword = getFirstString(arr);
+					Text t = Text(keyword, decompressText(arr[1..$], &strm), null, null, 0, 1);
+					result.textData ~= t;
+					break;
+				case ChunkInitializers.IntTextData:
+					ubyte[] arr = readBuffer.dup;
+					string keyword = getFirstString(arr);
+					const ubyte cmprflag = arr[0];
+					arr = arr[2..$];
+
+					string lngTag;
+					if (arr[0] != '\n') lngTag = getFirstString(arr);
+					else arr = arr[1..$];
+
+					string intrntKeyword;
+					if (arr[0] != '\n') intrntKeyword = getFirstString(arr);
+					else arr = arr[1..$];
+
+					if (cmprflag) {
+						result.textData ~= Text(keyword, decompressText(arr, &strm), lngTag, intrntKeyword, 0, 1);
+					} else {
+						result.textData ~= Text(keyword, reinterpretCast!char(arr).idup, lngTag, intrntKeyword, 0, 0);
 					}
 					break;
 				case ChunkInitializers.End:
@@ -505,6 +673,9 @@ public class PNG : Image, MultiImage{
 		}
 		return result;
 	}
+	/**
+	 * Decompresses a block of graphics data.
+	 */
 	/**
 	 * Reconstructs a scanline from `Sub` filtering.
 	 */
@@ -910,9 +1081,12 @@ public class PNG : Image, MultiImage{
 	public uint setCurrentImage(uint frame) @safe pure {
 		return uint.init; // TODO: implement
 	}
-	
+	///Sets the current image to the static if available
+	public void setStaticImage() @safe pure {
+
+	}
 	public uint nOfImages() @property @safe @nogc pure const {
-		return uint.init; // TODO: implement
+		return cast(uint)(frames.length + 1);
 	}
 	
 	public uint frameTime() @property @safe @nogc pure const {
@@ -920,8 +1094,106 @@ public class PNG : Image, MultiImage{
 	}
 	
 	public bool isAnimation() @property @safe @nogc pure const {
-		return bool.init; // TODO: implement
+		return frames.length ? true : false;
 	}
+	
+	public string getMetadata(string id) @safe pure {
+		foreach (Text key; textData) {
+			if (key.keyword == id)
+				return key.text;
+		}
+		return null;
+	}
+	
+	public string setMetadata(string id, string val) @safe pure {
+		foreach (ref Text key; textData) {
+			if (key.keyword == id)
+				return key.text = val;
+		}
+		textData ~= Text (id, val, null, null, 0, 0);
+		return val;
+	}
+	
+	public string getID() @safe pure {
+		return getMetadata("Title");
+	}
+	
+	public string getAuthor() @safe pure {
+		return getMetadata("Author");
+	}
+	
+	public string getComment() @safe pure {
+		return getMetadata("Comment");
+	}
+	
+	public string getJobName() @safe pure {
+		return getMetadata("Job Name");
+	}
+	
+	public string getSoftwareInfo() @safe pure {
+		return getMetadata("Software");
+	}
+	
+	public string getSoftwareVersion() @safe pure {
+		return getMetadata("Software Version");
+	}
+	
+	public string getDescription() @safe pure {
+		return getMetadata("Description");
+	}
+	
+	public string getSource() @safe pure {
+		return getMetadata("Source");
+	}
+	
+	public string getCopyright() @safe pure {
+		return getMetadata("Copyright");
+	}
+	
+	public string getCreationTimeStr() @safe pure {
+		return getMetadata("Creation Time");
+	}
+	
+	public string setID(string val) @safe pure {
+		return setMetadata("Title", val);
+	}
+	
+	public string setAuthor(string val) @safe pure {
+		return setMetadata("Author", val);
+	}
+	
+	public string setComment(string val) @safe pure {
+		return setMetadata("Comment", val);
+	}
+	
+	public string setJobName(string val) @safe pure {
+		return setMetadata("Job Name", val);
+	}
+	
+	public string setSoftwareInfo(string val) @safe pure {
+		return setMetadata("Software", val);
+	}
+	
+	public string setSoftwareVersion(string val) @safe pure {
+		return setMetadata("Software Version", val);
+	}
+	
+	public string setDescription(string val) @safe pure {
+		return setMetadata("Description", val);
+	}
+	
+	public string setSource(string val) @safe pure {
+		return setMetadata("Source", val);
+	}
+	
+	public string setCopyright(string val) @safe pure {
+		return setMetadata("Copyright", val);
+	}
+	
+	public string setCreationTime(string val) @safe pure {
+		return setMetadata("Creation Time", val);
+	}
+	
 	
 	
 }

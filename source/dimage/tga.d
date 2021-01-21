@@ -965,6 +965,20 @@ public class TGA : Image, ImageMetadata{
 					/ 10) ~ "." ~ to!string(extensionArea[0].softwareVersNum % 10) ~ extensionArea[0].softwareVersChar;
 		return null;
 	}
+	public string getDescription() @safe pure {
+		return null;
+	}
+	public string getCopyright() @safe pure {
+		return null;
+	}
+	public string getSource() @safe pure {
+		return null;
+	}
+	public string getCreationTimeStr() @safe pure {
+		return null;
+	}
+
+
 	public string setID(string val) @safe{
 		if(val.length > 255)
 			throw new Exception("ID is too long");
@@ -1032,6 +1046,18 @@ public class TGA : Image, ImageMetadata{
 				extensionArea[0].softwareVersChar = val[prelimiter+2];
 			return val;
 		}
+		return null;
+	}
+	public string setDescription(string val) @safe pure {
+		return null;
+	}
+	public string setSource(string val) @safe pure {
+		return null;
+	}
+	public string setCopyright(string val) @safe pure {
+		return null;
+	}
+	public string setCreationTime(string val) @safe pure {
 		return null;
 	}
 	/**

@@ -29,12 +29,29 @@ public interface ImageMetadata {
 	public string getJobName() @safe pure;
 	public string getSoftwareInfo() @safe pure;
 	public string getSoftwareVersion() @safe pure;
+	public string getDescription() @safe pure;
+	public string getSource() @safe pure;
+	public string getCopyright() @safe pure;
+	public string getCreationTimeStr() @safe pure;
+
 	public string setID(string val) @safe pure;
 	public string setAuthor(string val) @safe pure;
 	public string setComment(string val) @safe pure;
 	public string setJobName(string val) @safe pure;
 	public string setSoftwareInfo(string val) @safe pure;
 	public string setSoftwareVersion(string val) @safe pure;
+	public string setDescription(string val) @safe pure;
+	public string setSource(string val) @safe pure;
+	public string setCopyright(string val) @safe pure;
+	public string setCreationTime(string val) @safe pure;
+}
+/**
+ * Allows to access custom-tagged textual metadata in images.
+ */
+public interface CustomImageMetadata : ImageMetadata {
+	public string getMetadata(string id) @safe pure;
+
+	public string setMetadata(string id, string val) @safe pure;
 }
 /**
  * Interface for common multi-image (eg. animation) functions.
@@ -44,6 +61,8 @@ public interface MultiImage {
 	public uint getCurrentImage() @safe pure;
 	///Sets which image is being set to be worked on.
 	public uint setCurrentImage(uint frame) @safe pure;
+	///Sets the current image to the static if available
+	public void setStaticImage() @safe pure;
 	///Number of images in a given multi-image.
 	public uint nOfImages() @property @safe @nogc pure const;
 	///Returns the frame duration in hmsec if animation for the given frame.
@@ -281,6 +300,22 @@ public class PaletteWithSepA(T) : Palette!T {
 		}
 		return result;
 	}
+}
+/**
+ * Auxiliary data wrapper.
+ * Stores data like filters for PNG images.
+ */
+public interface AuxData {
+	///Returns the type of the auxiliary data.
+	public @property uint type() @nogc @safe pure nothrow const;
+}
+/**
+ * Frame data for animation.
+ */
+public class AnimData {
+	public uint		hOffset;		///Horizontal offset
+	public uint		vOffset;		///Vertical offset
+	public uint		hold;			///msecs to display this animation
 }
 /**
  * Basic imagedata wrapper.

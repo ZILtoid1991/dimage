@@ -369,7 +369,10 @@ public class TIFF : Image, MultiImage, ImageMetadata {
 	public uint setCurrentImage(uint frame) @safe pure {
 		return currentImg = frame; // TODO: implement
 	}
-
+	///Sets the current image to the static if available
+	public void setStaticImage() @safe pure {
+		
+	}
 	public uint nOfImages() @property @safe @nogc pure const {
 		return cast(uint)directoryEntries.length;
 	}
@@ -406,6 +409,22 @@ public class TIFF : Image, MultiImage, ImageMetadata {
 		return string.init; // TODO: implement
 	}
 	
+	public string getDescription() @safe pure {
+		return string.init; // TODO: implement
+	}
+	
+	public string getSource() @safe pure {
+		return string.init; // TODO: implement
+	}
+	
+	public string getCopyright() @safe pure {
+		return string.init; // TODO: implement
+	}
+	
+	public string getCreationTimeStr() @safe pure {
+		return string.init; // TODO: implement
+	}
+	
 	public string setID(string val) @safe pure {
 		return string.init; // TODO: implement
 	}
@@ -430,5 +449,19 @@ public class TIFF : Image, MultiImage, ImageMetadata {
 		return string.init; // TODO: implement
 	}
 	
-
+	public string setDescription(string val) @safe pure {
+		return string.init; // TODO: implement
+	}
+	
+	public string setCopyright(string val) @safe pure {
+		return string.init; // TODO: implement
+	}
+	
+	public string setSource(string val) @safe pure {
+		return string.init; // TODO: implement
+	}
+	
+	public string setCreationTime(string val) @safe pure {
+		return string.init; // TODO: implement
+	}
 }
