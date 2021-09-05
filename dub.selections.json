@@ -1,7 +1,7 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"bitleveld": "0.1.0-alpha",
+		"bitleveld": "0.1.0",
 		"lzwford": "1.0.0",
 		"vfile": "0.1.2"
 	}

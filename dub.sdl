@@ -4,7 +4,7 @@ authors "Laszlo Szeremi"
 copyright "Copyright © 2018, Laszlo Szeremi"
 license "Boost"
 target "library"
-dependency "bitleveld" version="0.1.0-alpha"
+dependency "bitleveld" version="*"
 configuration "unittest"{
 	dependency "vfile" version="*"
 }
