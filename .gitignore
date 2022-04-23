@@ -13,6 +13,7 @@
 
 # Executables
 *.exe
+dimage-test-unittest
 
 # DUB
 .dub

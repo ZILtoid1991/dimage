@@ -597,7 +597,7 @@ unittest {
 	import vfile;
 	{
 		std.stdio.File testFile1 = std.stdio.File("./test/bmp/TRU256.BMP");
-		std.stdio.File testFile2 = std.stdio.File("./test/bmp/TRU256_I.BMP");
+		std.stdio.File testFile2 = std.stdio.File("./test/bmp/TRU256_I.bmp");
 		BMP test1 = BMP.load(testFile1);
 		BMP test2 = BMP.load(testFile2);
 		compareImages!true(test1, test2);
