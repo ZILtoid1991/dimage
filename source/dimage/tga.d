@@ -20,11 +20,11 @@ import std.conv : to;
 /**
  * Implements the Truevision Graphics bitmap file format (*.tga) with some extra capabilities at the cost
  * of making them unusable in applications not implementing these features:
- * <ul>
- * <li>Capability of storing 1, 2, and 4 bit indexed images.</li>
- * <li>External color map support.</li>
- * <li>More coming soon such as more advanced compression methods.</li>
- * </ul>
+ * 
+ * * Capability of storing 1, 2, and 4 bit indexed images.
+ * * External color map support.
+ * * More coming soon such as more advanced compression methods.
+ * 
  * Accessing developer area is fully implemented, accessing extension area is partly implemented.
  */
 public class TGA : Image, ImageMetadata{
@@ -296,7 +296,12 @@ public class TGA : Image, ImageMetadata{
 
 	}
 	/**
-	 * Creates a TGA object without a footer.
+	 * Creates a TGA file without a footer.
+	 * Params:
+	 *   header = The header to be used for the image. Must match the values of _imageData and such.
+	 *   _imageData = The imagedata to be used for the imagefile.
+	 *   _palette = Palette data if any.
+	 *   imageID = Image name.
 	 */
 	public this(Header header, IImageData _imageData, IPalette _palette = null, char[] imageID = null) @safe {
 		this.header = header;
@@ -306,6 +311,12 @@ public class TGA : Image, ImageMetadata{
 	}
 	/**
 	 * Creates a TGA file safely with automatically generated header.
+	 * This constructor is the recommended one for general use.
+	 * Params:
+	 *   _imageData = The imagedata to be used for the imagefile. Automatically adjusts the header format to this.
+	 *   _palette = Palette data if any.
+	 *   imageID = Image name.
+	 *   isRLE = If true, then RLE compression will be used.
 	 */
 	public this(IImageData _imageData, IPalette _palette = null, char[] imageID = null, bool isRLE = false) @safe {
 		this._imageData = _imageData;
@@ -321,7 +332,13 @@ public class TGA : Image, ImageMetadata{
 		header.setImageType(_imageData.pixelFormat, isRLE);
 	}
 	/**
-	 * Creates a TGA object with a footer.
+	 * Creates a TGA file with a footer.
+	 * Params:
+	 *   header = The header to be used for the image. Must match the values of _imageData and such.
+	 *   footer = The footer to be used for the image.
+	 *   _imageData = The imagedata to be used for the imagefile.
+	 *   _palette = Palette data if any.
+	 *   imageID = Image name.
 	 */
 	public this(Header header, Footer footer, IImageData _imageData, IPalette _palette = null, char[] imageID = null) @safe {
 		this.header = header;
