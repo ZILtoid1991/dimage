@@ -49,8 +49,14 @@ public interface ImageMetadata {
  * Allows to access custom-tagged textual metadata in images.
  */
 public interface CustomImageMetadata : ImageMetadata {
+	/**
+	 * Returns the metadata with the given `id`.
+	 * Returns null if not found.
+	 */
 	public string getMetadata(string id) @safe pure;
-
+	/**
+	 * Sets the given metadata to `val` at the given `id`, then returns the new value.
+	 */
 	public string setMetadata(string id, string val) @safe pure;
 }
 /**
