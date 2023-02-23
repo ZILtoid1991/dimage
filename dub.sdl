@@ -5,6 +5,7 @@ copyright "Copyright © 2018, Laszlo Szeremi"
 license "Boost"
 target "library"
 dependency "bitleveld" version="*"
+libs "z" version="linux"
 configuration "unittest"{
 	dependency "vfile" version="*"
 }

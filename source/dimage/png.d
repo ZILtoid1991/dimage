@@ -1205,7 +1205,7 @@ unittest{
 	import vfile;
 	import dimage.tga;
 	{
-		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE24.png");
+		std.stdio.File indexedPNGFile = std.stdio.File("./test/png/MARBLE24.PNG");
 		std.stdio.writeln("Loading ", indexedPNGFile.name);
 		PNG a = PNG.load(indexedPNGFile);
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
