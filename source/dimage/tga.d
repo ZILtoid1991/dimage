@@ -311,8 +311,8 @@ public class TGA : Image, ImageMetadata{
 		this._imageData = _imageData;
 		this._palette = _palette;
 		this.imageID = imageID;
-		header.width = cast(ubyte)_imageData.width;
-		header.height = cast(ubyte)_imageData.height;
+		header.width = cast(ushort)_imageData.width;
+		header.height = cast(ushort)_imageData.height;
 		if(_palette) {
 			header.colorMapLength = cast(ushort)this._palette.length;
 			header.colorMapDepth = this._palette.bitDepth;

@@ -292,13 +292,16 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 	/**
 	 * Creates an empty PNG file in memory
 	 */
-	public this(IImageData imgDat, IPalette pal) @safe pure {
+	public this(IImageData imgDat, IPalette pal = null) @safe pure {
 		//header = Header(width, height, bitDepth, colorType, compression, 0, 0);
 		_imageData = imgDat;
 		_palette = pal;
 		switch(imgDat.pixelFormat) {
 			case PixelFormat.Indexed1Bit: .. case PixelFormat.Indexed8Bit:
 				header.colorType = ColorType.Indexed;
+				break;
+			case PixelFormat.Grayscale1Bit: .. case PixelFormat.Grayscale8Bit:
+				header.colorType = ColorType.Greyscale;
 				break;
 			case PixelFormat.YA88 | PixelFormat.BigEndian:
 				header.colorType = ColorType.GreyscaleWithAlpha;
@@ -356,7 +359,7 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			while (strm.avail_in) {
 				ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
 				if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
-					version(unittest) std.stdio.writeln(ret);
+					/* version(unittest) std.stdio.writeln(ret); */
 					zlib.inflateEnd(&strm);
 					zlib.inflateEnd(extstrm);
 					throw new ImageFileException("Text data decompression error");
@@ -409,11 +412,11 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 				case ChunkInitializers.Header:
 					result.header = reinterpretGet!Header(readBuffer);
 					result.header.bigEndianToNative;
-					version (unittest) std.stdio.writeln(result.header);
+					/* version (unittest) std.stdio.writeln(result.header); */
 					result.pitch = (result.header.width * result.getBitdepth) / 8;
-					version (unittest) std.stdio.writeln("Pitch length: ", result.pitch);
+					/* version (unittest) std.stdio.writeln("Pitch length: ", result.pitch); */
 					imageBuffer.length = result.pitch + 1;
-					version (unittest) std.stdio.writeln(result.getPixelFormat);
+					/* version (unittest) std.stdio.writeln(result.getPixelFormat); */
 					strm.next_out = imageBuffer.ptr;
 					strm.avail_out = cast(uint)imageBuffer.length;
 					//result.pitch = result.header.width;
@@ -455,7 +458,7 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					while (strm.avail_in) {
 						ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
 						if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
-							version(unittest) std.stdio.writeln(ret);
+							/* version(unittest) std.stdio.writeln(ret); */
 							zlib.inflateEnd(&strm);
 							throw new ImageFileException("Decompression error");
 						}else if(imageBuffer.length == strm.total_out){
@@ -540,10 +543,10 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					//Process any unknown chunk as embedded data
 					//EmbeddedData chnk = new EmbeddedData(pos, curChunk.identifier, readBuffer.dup);
 					result.addAncilliaryChunk(pos, curChunk.identifier, readBuffer.dup);
-					version (unittest) {
+					/* version (unittest) {
 						std.stdio.writeln ("Acilliary chunk found!");
 						std.stdio.writeln ("ID: " , curChunk.identifier, " size: ", readBuffer.length, " pos: ", pos);
-					}
+					} */
 					break;
 				
 			}
@@ -594,10 +597,10 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					reconstructScanlinePaeth(scanline, prevScanline, wordlength);
 					break;
 				default:
-					version (unittest) {
+					/* version (unittest) {
 						if(result.filterBytes[y]) std.stdio.writeln("Irregular filter type value of \"", result.filterBytes[y] 
 							,"\" found at scanline ", y );
-					}
+					} */
 					break;
 			}
 			prevScanline = scanline;
