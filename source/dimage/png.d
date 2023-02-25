@@ -300,25 +300,44 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 		header.width = imgDat.width;
 		header.height = imgDat.height;
 		filterBytes.length = imgDat.height;
-		switch(imgDat.pixelFormat) {
+		pitch = (header.width * imgDat.bitDepth) / 8;
+		switch (imgDat.pixelFormat) {
 			case PixelFormat.Indexed1Bit: .. case PixelFormat.Indexed8Bit:
 				header.colorType = ColorType.Indexed;
+				header.bitDepth = imgDat.bitDepth;
 				break;
-			case PixelFormat.Grayscale1Bit: .. case PixelFormat.Grayscale8Bit:
+			case PixelFormat.Grayscale1Bit: .. case PixelFormat.Grayscale8Bit: case PixelFormat.Grayscale16Bit:
 				header.colorType = ColorType.Greyscale;
+				header.bitDepth = imgDat.bitDepth;
 				break;
 			case PixelFormat.YA88 | PixelFormat.BigEndian:
 				header.colorType = ColorType.GreyscaleWithAlpha;
+				header.bitDepth = imgDat.bitDepth / 2;
 				break;
-			case PixelFormat.RGB888 | PixelFormat.BigEndian, PixelFormat.RGBX5551 | PixelFormat.BigEndian:
+			case PixelFormat.RGB888 | PixelFormat.BigEndian, PixelFormat.RGBX5551 | PixelFormat.BigEndian, 
+					PixelFormat.RGB16_16_16 | PixelFormat.BigEndian:
 				header.colorType = ColorType.TrueColor;
+				header.bitDepth = imgDat.bitDepth / 3;
 				break;
-			case PixelFormat.RGBA8888 | PixelFormat.BigEndian:
+			case PixelFormat.RGBA8888 | PixelFormat.BigEndian, PixelFormat.RGBA16_16_16_16 | PixelFormat.BigEndian:
 				header.colorType = ColorType.TrueColorWithAlpha;
+				header.bitDepth = imgDat.bitDepth / 4;
 				break;
 			default: throw new ImageFormatException("Image format currently not supported!");
 		}
-		
+		switch (header.bitDepth) {
+			case 1:
+				if (header.width & 7) pitch++;
+				break;
+			case 2:
+				if (header.width & 3) pitch++;
+				break;
+			case 4:
+				if (header.width & 1) pitch++;
+				break;
+			default:
+				break;
+		}		
 	}
 	protected this(){
 
@@ -785,6 +804,7 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			}
 			prevScanline = scanline;
 		}
+		assert(imageTemp0.length == imageTemp.length, "Image processing buffer error!");
 		if (header.bitDepth == 16) {
 			ushort[] arr = nativeStreamToBigEndian!ushort(reinterpretCast!ushort(imageTemp));
 			imageTemp = reinterpretCast!ubyte(arr);
@@ -1214,8 +1234,8 @@ unittest{
 		PNG a = PNG.load(indexedPNGFile);
 		std.stdio.writeln("File `", indexedPNGFile.name, "` successfully loaded");
 		assert(a.getBitdepth == 24, "Bitdepth error!");
-		std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
-		a.save(output);
+		//std.stdio.File output = std.stdio.File("./test/png/output.png", "wb");
+		//a.save(output);
 		VFile virtualIndexedPNGFile;
 		a.save(virtualIndexedPNGFile);
 		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
@@ -1264,7 +1284,7 @@ unittest{
 		PNG a = PNG.load(sourceFile);
 		std.stdio.writeln("File `", sourceFile.name, "` successfully loaded");
 		//std.stdio.writeln(a.filterBytes);
-		std.stdio.File output = std.stdio.File("./test/png/output_" ~ fn, "wb"); 
+		//std.stdio.File output = std.stdio.File("./test/png/output_" ~ fn, "wb"); 
 		//a.save(output);
 		VFile virtualPNGFile;
 		a.save(virtualPNGFile);
@@ -1278,15 +1298,16 @@ unittest{
 		PNG c = new PNG(a.imageData, a.palette);
 		compareImages(a, c);
 		virtualPNGFile = VFile.init;
-		c.save(output);
-		output.rewind();
-		b = PNG.load(output);
+		c.save(virtualPNGFile);
+		//output.rewind();
+		virtualPNGFile.seek(0);
+		b = PNG.load(virtualPNGFile);
 		std.stdio.writeln("Image restored from virtual file");
 		compareImages(a, b);
 		std.stdio.writeln("The two images' output match");
 	}
 	//test against TGA versions of the same images
-	/+{
+	/* {
 		std.stdio.File tgaSource = std.stdio.File("./test/tga/mapped_8.tga");
 		std.stdio.File pngSource = std.stdio.File("./test/png/mapped_8.png");
 		std.stdio.writeln("Loading ", tgaSource.name);
@@ -1294,7 +1315,7 @@ unittest{
 		std.stdio.writeln("Loading ", pngSource.name);
 		PNG pngImage = PNG.load(pngSource);
 		compareImages!true(tgaImage, pngImage);
-	}
+	} */
 	{
 		std.stdio.File tgaSource = std.stdio.File("./test/tga/truecolor_24.tga");
 		std.stdio.File pngSource = std.stdio.File("./test/png/truecolor_24.png");
@@ -1312,5 +1333,5 @@ unittest{
 		std.stdio.writeln("Loading ", pngSource.name);
 		PNG pngImage = PNG.load(pngSource);
 		compareImages!true(tgaImage, pngImage);
-	}+/
+	}
 }
