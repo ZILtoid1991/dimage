@@ -296,6 +296,10 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 		//header = Header(width, height, bitDepth, colorType, compression, 0, 0);
 		_imageData = imgDat;
 		_palette = pal;
+		header.bitDepth = imgDat.bitDepth;
+		header.width = imgDat.width;
+		header.height = imgDat.height;
+		filterBytes.length = imgDat.height;
 		switch(imgDat.pixelFormat) {
 			case PixelFormat.Indexed1Bit: .. case PixelFormat.Indexed8Bit:
 				header.colorType = ColorType.Indexed;
@@ -314,7 +318,7 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 				break;
 			default: throw new ImageFormatException("Image format currently not supported!");
 		}
-		header.bitDepth = imgDat.bitDepth;
+		
 	}
 	protected this(){
 
@@ -1261,12 +1265,22 @@ unittest{
 		std.stdio.writeln("File `", sourceFile.name, "` successfully loaded");
 		//std.stdio.writeln(a.filterBytes);
 		std.stdio.File output = std.stdio.File("./test/png/output_" ~ fn, "wb"); 
-		a.save(output);
-		VFile virtualIndexedPNGFile;
-		a.save(virtualIndexedPNGFile);
-		std.stdio.writeln("Successfully saved to virtual file ", virtualIndexedPNGFile.size);
-		virtualIndexedPNGFile.seek(0);
-		PNG b = PNG.load(virtualIndexedPNGFile);
+		//a.save(output);
+		VFile virtualPNGFile;
+		a.save(virtualPNGFile);
+		std.stdio.writeln("Successfully saved to virtual file ", virtualPNGFile.size);
+		virtualPNGFile.seek(0);
+		PNG b = PNG.load(virtualPNGFile);
+		std.stdio.writeln("Image restored from virtual file");
+		compareImages(a, b);
+		std.stdio.writeln("The two images' output match");
+		std.stdio.writeln("Reconstructing PNG from image data");
+		PNG c = new PNG(a.imageData, a.palette);
+		compareImages(a, c);
+		virtualPNGFile = VFile.init;
+		c.save(output);
+		output.rewind();
+		b = PNG.load(output);
 		std.stdio.writeln("Image restored from virtual file");
 		compareImages(a, b);
 		std.stdio.writeln("The two images' output match");
