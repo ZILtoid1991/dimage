@@ -382,7 +382,6 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			while (strm.avail_in) {
 				ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
 				if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
-					/* version(unittest) std.stdio.writeln(ret); */
 					zlib.inflateEnd(&strm);
 					zlib.inflateEnd(extstrm);
 					throw new ImageFileException("Text data decompression error");
@@ -430,19 +429,14 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			readBuffer.length = curChunk.dataLength;
 			if(curChunk.dataLength)
 				file.rawRead(readBuffer);
-			//std.stdio.writeln("pos:", file.tell);
 			switch(curChunk.identifier){
 				case ChunkInitializers.Header:
 					result.header = reinterpretGet!Header(readBuffer);
 					result.header.bigEndianToNative;
-					/* version (unittest) std.stdio.writeln(result.header); */
 					result.pitch = (result.header.width * result.getBitdepth) / 8;
-					/* version (unittest) std.stdio.writeln("Pitch length: ", result.pitch); */
 					imageBuffer.length = result.pitch + 1;
-					/* version (unittest) std.stdio.writeln(result.getPixelFormat); */
 					strm.next_out = imageBuffer.ptr;
 					strm.avail_out = cast(uint)imageBuffer.length;
-					//result.pitch = result.header.width;
 					break;
 				case ChunkInitializers.Palette:
 					paletteTemp = readBuffer.dup;
@@ -481,7 +475,6 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					while (strm.avail_in) {
 						ret = zlib.inflate(&strm, zlib.Z_FULL_FLUSH);
 						if(!(ret == zlib.Z_OK || ret == zlib.Z_STREAM_END)){
-							/* version(unittest) std.stdio.writeln(ret); */
 							zlib.inflateEnd(&strm);
 							throw new ImageFileException("Decompression error");
 						}else if(imageBuffer.length == strm.total_out){
@@ -554,7 +547,7 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					version (unittest) assert(result.header.height == scanlineCounter, "Scanline count mismatch");
 					if(imageTemp.length + result.filterBytes.length > strm.total_out){
 						zlib.inflateEnd(&strm);
-						//version(unittest) std.stdio.writeln()
+						
 						throw new ImageFileCompressionException("Decompression error! Image ended at: " ~ to!string(strm.total_out) ~ 
 						"; Required length: " ~ to!string(imageTemp.length));
 					}
@@ -566,10 +559,7 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					//Process any unknown chunk as embedded data
 					//EmbeddedData chnk = new EmbeddedData(pos, curChunk.identifier, readBuffer.dup);
 					result.addAncilliaryChunk(pos, curChunk.identifier, readBuffer.dup);
-					/* version (unittest) {
-						std.stdio.writeln ("Acilliary chunk found!");
-						std.stdio.writeln ("ID: " , curChunk.identifier, " size: ", readBuffer.length, " pos: ", pos);
-					} */
+					
 					break;
 				
 			}
@@ -620,10 +610,7 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					reconstructScanlinePaeth(scanline, prevScanline, wordlength);
 					break;
 				default:
-					/* version (unittest) {
-						if(result.filterBytes[y]) std.stdio.writeln("Irregular filter type value of \"", result.filterBytes[y] 
-							,"\" found at scanline ", y );
-					} */
+					
 					break;
 			}
 			prevScanline = scanline;
@@ -661,8 +648,8 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 				break;
 			case PixelFormat.RGB16_16_16:
 				//imageTemp = bigEndianStreamToNative(imageTemp);
-				result._imageData = new ImageData!RGB16_16_16BE(reinterpretCast!RGB16_16_16BE(imageTemp), result.width, result.height, 
-						result.getPixelFormat, result.getBitdepth);
+				result._imageData = new ImageData!RGB16_16_16BE(reinterpretCast!RGB16_16_16BE(imageTemp), result.width, 
+						result.height, result.getPixelFormat, result.getBitdepth);
 				break;
 			case PixelFormat.RGBX5551:
 				result._imageData = new ImageData!RGBA5551(reinterpretCast!RGBA5551(imageTemp), result.width, result.height, 
@@ -725,7 +712,8 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 	/**
 	 * Reconstructs a scanline from `Average` filtering
 	 */
-	protected static ubyte[] reconstructScanlineAverage(ubyte[] target, ubyte[] prevScanline, int bytedepth) @safe nothrow {
+	protected static ubyte[] reconstructScanlineAverage(ubyte[] target, ubyte[] prevScanline, int bytedepth) 
+			@safe nothrow {
 		assert(target.length == prevScanline.length);
 		for (size_t i ; i < target.length ; i++) {
 			const uint a = i >= bytedepth ? target[i - bytedepth] : 0;
@@ -776,15 +764,12 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			return val;
 		}
 		ubyte[] crc;
-		//ubyte[] paletteData;
-		//if (_palette) paletteData = _palette.raw;
 		ubyte[] imageTemp0 = _imageData.raw, imageTemp;
 		ubyte[] scanline, prevScanline;
 		prevScanline.length = pitch;	//First filter should be either none or sub, but not all writers are obeying the standard
 		int wordlength = getBitdepth > 8 ? getBitdepth / 8 : 1;
 		for (uint y ; y < height ; y++) {
 			scanline = imageTemp0[(y * pitch)..((y + 1) * pitch)];
-			//version (unittest) std.stdio.writeln(scanline.ptr,";",prevScanline.ptr);
 			switch(filterBytes[y]) {
 				case FilterType.Sub:
 					imageTemp ~= filterScanlineSub(scanline, wordlength);
@@ -846,7 +831,8 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			crc = crc32Of((cast(ubyte[])ChunkInitializers.Palette) ~ paletteData).dup.reverse;
 			file.rawWrite(crc);
 			if (transparencyData.length) {
-				writeBuffer = cast(void[])[Chunk(cast(uint)transparencyData.length, ChunkInitializers.Transparency).nativeToBigEndian];
+				writeBuffer = cast(void[])
+						[Chunk(cast(uint)transparencyData.length, ChunkInitializers.Transparency).nativeToBigEndian];
 				file.rawWrite(writeBuffer);
 				file.rawWrite(transparencyData);
 				crc = crc32Of((cast(ubyte[])ChunkInitializers.Transparency) ~ transparencyData).dup.reverse;
@@ -861,7 +847,8 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			} else {
 				transparencyData = reinterpretAsArray!ubyte(nativeTrns);
 			}
-			writeBuffer = cast(void[])[Chunk(cast(uint)transparencyData.length, ChunkInitializers.Transparency).nativeToBigEndian];
+			writeBuffer = cast(void[])[Chunk(cast(uint)transparencyData.length, 
+					ChunkInitializers.Transparency).nativeToBigEndian];
 			file.rawWrite(writeBuffer);
 			file.rawWrite(transparencyData);
 			crc = crc32Of((cast(ubyte[])ChunkInitializers.Transparency) ~ transparencyData).dup.reverse;
@@ -876,7 +863,8 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 				} else {
 					transparencyData = reinterpretAsArray!ubyte(nativeTrns);
 				}
-				writeBuffer = cast(void[])[Chunk(cast(uint)transparencyData.length, ChunkInitializers.Background).nativeToBigEndian];
+				writeBuffer = cast(void[])[Chunk(cast(uint)transparencyData.length, 
+						ChunkInitializers.Background).nativeToBigEndian];
 				file.rawWrite(writeBuffer);
 				file.rawWrite(transparencyData);
 				crc = crc32Of((cast(ubyte[])ChunkInitializers.Transparency) ~ transparencyData).dup.reverse;
@@ -921,7 +909,6 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 			strm.next_out = output.ptr;
 			strm.avail_out = cast(uint)output.length;
 			do {
-				//std.stdio.writeln(ret, ";", strm.avail_in, ";", strm.total_in, ";", strm.total_out);
 				if (!strm.avail_out) {
 					writeBuffer = cast(void[])[Chunk(cast(uint)output.length, ChunkInitializers.Data).nativeToBigEndian];
 					file.rawWrite(writeBuffer);
@@ -932,7 +919,6 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 					strm.avail_out = cast(uint)output.length;
 				}
 				ret = zlib.deflate(&strm, zlib.Z_FINISH);
-				//std.stdio.writeln(ret, ";", strm.avail_out);
 				if(ret < 0){
 					zlib.deflateEnd(&strm);
 					throw new Exception("Compressor output error: " ~ cast(string)std.string.fromStringz(strm.msg));
@@ -949,7 +935,8 @@ public class PNG : Image, MultiImage, CustomImageMetadata {
 				}
 			}
 			if (strm.avail_out != output.length) {
-				writeBuffer = cast(void[])[Chunk(cast(uint)(output.length - strm.avail_out), ChunkInitializers.Data).nativeToBigEndian];
+				writeBuffer = cast(void[])
+						[Chunk(cast(uint)(output.length - strm.avail_out), ChunkInitializers.Data).nativeToBigEndian];
 				file.rawWrite(writeBuffer);
 				file.rawWrite(output[0..$-strm.avail_out]);
 				crc = crc32Of((cast(ubyte[])ChunkInitializers.Data) ~ output[0..$-strm.avail_out]).dup.reverse;
@@ -1333,5 +1320,10 @@ unittest{
 		std.stdio.writeln("Loading ", pngSource.name);
 		PNG pngImage = PNG.load(pngSource);
 		compareImages!true(tgaImage, pngImage);
+	}
+	{	//BUG #1: flipHorizontal() reads out of bounds
+		std.stdio.File pngSource = std.stdio.File("./test/png/verysmol.png");
+		PNG pngImage = PNG.load(pngSource);
+		pngImage.flipHorizontal();
 	}
 }

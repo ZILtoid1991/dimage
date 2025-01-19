@@ -651,8 +651,8 @@ public class MonochromeImageData (T) : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width / 2 ; x++) {
 				const T tmp = opIndex(x, y);
-				opIndex(x, y) = opIndex(_width - x, y);
-				opIndex(_width - x, y) = tmp;
+				opIndex(x, y) = opIndex(_width - x - 1, y);
+				opIndex(_width - x - 1, y) = tmp;
 			}
 		}
 	}
@@ -984,8 +984,8 @@ public class MonochromeImageData2Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const ubyte tmp = opIndex(x, y);
-				opIndexAssign(opIndex(_width - x, y), x, y);
-				opIndexAssign(tmp, _width - x, y);
+				opIndexAssign(opIndex(_width - x - 1, y), x, y);
+				opIndexAssign(tmp, _width - x - 1, y);
 			}
 		}
 	}
@@ -1140,8 +1140,8 @@ public class MonochromeImageData1Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const bool tmp = opIndex(x, y);
-				opIndexAssign(opIndex(_width - x, y), x, y);
-				opIndexAssign(tmp, _width - x, y);
+				opIndexAssign(opIndex(_width - x - 1, y), x, y);
+				opIndexAssign(tmp, _width - x - 1, y);
 			}
 		}
 	}
@@ -1305,8 +1305,8 @@ public class IndexedImageData (T) : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const T tmp = opIndex(x, y);
-				opIndex(x, y) = opIndex(_width - x, y);
-				opIndex(_width - x, y) = tmp;
+				opIndex(x, y) = opIndex(_width - x - 1, y);
+				opIndex(_width - x - 1, y) = tmp;
 			}
 		}
 	}
@@ -1480,8 +1480,8 @@ public class IndexedImageData4Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const ubyte tmp = opIndex(x, y);
-				opIndexAssign(opIndex(_width - x, y), x, y);
-				opIndexAssign(tmp, _width - x, y);
+				opIndexAssign(opIndex(_width - x - 1, y), x, y);
+				opIndexAssign(tmp, _width - x - 1, y);
 			}
 		}
 	}
@@ -1663,8 +1663,8 @@ public class IndexedImageData2Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const ubyte tmp = opIndex(x, y);
-				opIndexAssign(opIndex(_width - x, y),x, y);
-				opIndexAssign(tmp, _width - x, y);
+				opIndexAssign(opIndex(_width - x - 1, y),x, y);
+				opIndexAssign(tmp, _width - x - 1, y);
 			}
 		}
 	}
@@ -1842,8 +1842,8 @@ public class IndexedImageData1Bit : IImageData {
 		for (uint y ; y < _height ; y++) {
 			for (uint x ; x < _width>>>1 ; x++) {
 				const bool tmp = opIndex(x, y);
-				opIndexAssign(opIndex(_width - x, y), x, y);
-				opIndexAssign(tmp, _width - x, y);
+				opIndexAssign(opIndex(_width - x - 1, y), x, y);
+				opIndexAssign(tmp, _width - x - 1, y);
 			}
 		}
 	}

@@ -6,10 +6,6 @@ license "Boost"
 target "library"
 dependency "bitleveld" version="*"
 //libs "z" version="linux"
-//configuration "unittest"{
 dependency "vfile" version="*"
-//}
-/* configuration "lzwsupport" {
-	dependency "lzwford" version="*"
-	versions "lzwsupport"
-} */
+dependency "lzwford" version="==1.1.0"
+

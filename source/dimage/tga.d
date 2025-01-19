@@ -172,7 +172,7 @@ public class TGA : Image, ImageMetadata{
 				default: throw new ImageFormatException("Palette format not supported!");
 			}
 		}
-		public string toString(){
+		public string toString() const {
 			import std.conv : to;
 			return 
 			"idLength:" ~ to!string(idLength) ~ "\n" ~
@@ -340,7 +340,8 @@ public class TGA : Image, ImageMetadata{
 	 *   _palette = Palette data if any.
 	 *   imageID = Image name.
 	 */
-	public this(Header header, Footer footer, IImageData _imageData, IPalette _palette = null, char[] imageID = null) @safe {
+	public this(Header header, Footer footer, IImageData _imageData, IPalette _palette = null, char[] imageID = null) 
+			@safe {
 		this.header = header;
 		this.footer = footer;
 		this._imageData = _imageData;
@@ -360,8 +361,8 @@ public class TGA : Image, ImageMetadata{
 			target >>= header.pixelDepth < 8 ? 1 : 0;
 			target >>= header.pixelDepth < 4 ? 1 : 0;
 			target >>= header.pixelDepth < 2 ? 1 : 0;
-			ubyte[] result, dataBuffer;
-			result.reserve(header.pixelDepth >= 8 ? target * bytedepth : target);
+			ubyte[] result0, dataBuffer;
+			result0.reserve(header.pixelDepth >= 8 ? target * bytedepth : target);
 			switch(header.pixelDepth) {
 				case 15, 16:
 					dataBuffer.length = 3;
@@ -376,13 +377,13 @@ public class TGA : Image, ImageMetadata{
 					dataBuffer.length = 2;
 					break;
 			}
-			while(result.length < target * bytedepth){
+			while(result0.length < target * bytedepth){
 				file.rawRead(dataBuffer);
 				if(dataBuffer[0] & 0b1000_0000){//RLE block
 					dataBuffer[0] &= 0b0111_1111;
 					dataBuffer[0]++;
 					while(dataBuffer[0]){
-						result ~= dataBuffer[1..$];
+						result0 ~= dataBuffer[1..$];
 						dataBuffer[0]--;
 						//target--;
 					}
@@ -393,12 +394,11 @@ public class TGA : Image, ImageMetadata{
 					ubyte[] literalBlock;
 					literalBlock.length = (dataBuffer[0] * bytedepth);
 					if(literalBlock.length)file.rawRead(literalBlock);
-					result ~= dataBuffer[1..$] ~ literalBlock;
+					result0 ~= dataBuffer[1..$] ~ literalBlock;
 				}
 			}
-			//std.stdio.writeln(result.length, ";", (header.width * header.height * bytedepth));
-			assert(result.length == (header.width * header.height * bytedepth), "RLE length mismatch error!");
-			return result;
+			assert(result0.length == (header.width * header.height * bytedepth), "RLE length mismatch error!");
+			return result0;
 		}
 		ubyte[] readBuffer;
 		readBuffer.length = Header.sizeof;
@@ -427,7 +427,8 @@ public class TGA : Image, ImageMetadata{
 			}
 		}
 		ubyte[] image;
-		if (result.header.imageType >= Header.ImageType.RLEMapped && result.header.imageType <= Header.ImageType.RLEGrayscale) {
+		if (result.header.imageType >= Header.ImageType.RLEMapped && 
+				result.header.imageType <= Header.ImageType.RLEGrayscale) {
 			image = loadRLEImageData(result.header);
 		} else {
 			image.length = (result.header.width * result.header.height * result.header.pixelDepth) / 8;
