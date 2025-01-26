@@ -26,6 +26,7 @@ import ncompress42;
 
 
 public class GIF : Image, MultiImage {
+	static enum ubyte	terminatorByte = 0x3B;
 	/**
 	 * Header for both 87a and 89a versions.
 	 */
@@ -149,8 +150,8 @@ public class GIF : Image, MultiImage {
 		if (result.header.globalColorTable) {
 			const size_t gctSize = (1<<(result.header.sOfGlobalColorTable)) * 3;
 			buffer.length = gctSize;
-			file.rawRead(buffer);
-			enforce!ImageFileException(buffer.length == gctSize, "File is corrupted!");
+			buffer = file.rawRead(buffer);
+			enforce!ImageFileException(buffer.length == gctSize, "File is corrupted and/or prematurely ended!");
 			globalColorTable = new Palette!(RGB888)(reinterpretCast!RGB888(buffer), PixelFormat.RGB888, 24);
 		}
 		//Initialize LZW decompression
@@ -181,9 +182,53 @@ public class GIF : Image, MultiImage {
 			currImg ~= bytes[0..numBytes];
 			return cast(int)numBytes;
 		}
+		secBuf = file.rawRead(secBuf);
+		do {
 
+			// enforce!ImageFileException(secBuf.length == 1, "File is corrupted and/or prematurely ended.");
+			switch (secBuf[0]) {
+			case ImageDescriptor.id:
+				buffer.length = ImageDescriptor.sizeof;
+				buffer = file.rawRead(buffer);
+				enforce!ImageFileException(buffer.length == ImageDescriptor.sizeof, "File is corrupted and/or prematurely ended!");
+				result.imageDescriptors ~= reinterpretGet!ImageDescriptor(buffer);
+				if (result.imageDescriptors[$ - 1].localColorTable) {
+					const size_t lctSize = (1<<imageDescriptors[$ - 1].sOfLocalColorTable) * 3;
+					buffer.length = lctSize;
+					buffer = file.rawRead(buffer);
+					enforce!ImageFileException(buffer.length == lctSize, "File is corrupted and/or prematurely ended!");
+				} else {
+					result.localPalettes ~= result.globalColorTable;
+				}
+				NCompressCtxt context;
+				context.reader = &lzwStreamReader;
+				context.writer = &lzwStreamWriter;
+				nInitDecompress(&context);
+				nDecompress(&context);
+				break;
+			case terminatorByte:
+				secBuf.length = 0;
+				break;
+			default: throw new ImageFileException("Unrecognized identifier found in GIF file!");
+			}
+			secBuf = file.rawRead(secBuf);
+		} while(secBuf.length == 1);
 
 		return result;
+	}
+	private ubyte[] deinterlacer(ref ubyte[] data, int pitch, int lines) {
+		static immutable byte[9] swapTableA = [1,2,3 ,5,6 ,7 ,9 ,11,13];
+		static immutable byte[9] swapTableB = [8,4,12,6,10,14,12,13,14];
+		scope ubyte[] workpad = new ubyte[pitch];
+		for (int i ; i < lines ; i+=16) {
+			for (int j ; j < 9 ; j++) {
+				workpad[] = data[(pitch*(i + swapTableB[j]))..(pitch*(i + swapTableB[j] + 1))];
+				data[(pitch*(i + swapTableB[j]))..(pitch*(i + swapTableB[j] + 1))] =
+						data[(pitch*(i + swapTableA[j]))..(pitch*(swapTableA[j] + 1))];
+				data[(pitch*(i + swapTableA[j]))..(pitch*(i + swapTableA[j] + 1))] = workpad;
+			}
+		}
+		return data;
 	}
 	///Returns which image is being set to be worked on.
 	public uint getCurrentImage() @safe pure {
