@@ -246,10 +246,10 @@ struct RGBA8888Templ (Endianness byteOrder = Endianness.Little) {
 	}
 	///Creates a standard pixel representation out from 4 separate values
 	this(ubyte r, ubyte g, ubyte b, ubyte a) @safe @nogc pure nothrow {
-		bytes[0] = r;
-		bytes[1] = g;
-		bytes[2] = b;
-		bytes[3] = a;
+		this.r = r;
+		this.g = g;
+		this.b = b;
+		this.a = a;
 	}
 	///Standard CTOR
 	this(float fR, float fG, float fB, float fA) @safe @nogc pure nothrow {

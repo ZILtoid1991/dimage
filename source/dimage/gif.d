@@ -17,14 +17,14 @@ import core.stdc.string;
 
 static import std.stdio;
 import ncompress42;
+
+
+
 /**
  * Implements reader/writer for *.GIF-files.
  * Animation is accessed from a sliding window of setting the required frame.
- * Requires linking against the ncompress library for LZW support.
+ * NOTE: Unfinished, do not use, I just needed to fix another bug.
  */
-
-
-
 public class GIF : Image, MultiImage {
 	static enum ubyte	terminatorByte = 0x3B;
 	/**
