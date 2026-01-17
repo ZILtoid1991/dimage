@@ -1,3 +1,5 @@
+**Notice: Project moved to the following link:** https://codeberg.org/ZILtoid1991/dimage
+
 # dimage
 Image file handling library for D by László Szerémi (laszloszeremi@outlook.com, https://twitter.com/ziltoid1991, 
 https://www.patreon.com/ShapeshiftingLizard, https://ko-fi.com/D1D45NEN).
